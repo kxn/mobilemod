@@ -76,6 +76,56 @@ func TestFragmentedFramesCorrelationAndSendResult(t *testing.T) {
 		t.Fatal("lost event")
 	}
 }
+
+// The transport can deliver a final response and close before Write returns.
+// A known outcome must survive either a write error or simultaneous EOF.
+func TestFinalResponseSurvivesTransportClose(t *testing.T) {
+	for _, writeError := range []bool{false, true} {
+		for _, rejected := range []bool{false, true} {
+			for i := 0; i < 64; i++ {
+				p := &replyThenClosePort{}
+				c := NewConnection(p)
+				p.write = func() {
+					c.mu.Lock()
+					w := c.waiters["request"]
+					c.mu.Unlock()
+					submitted := true
+					e := domain.Envelope{Event: "sms_result", Submitted: &submitted}
+					if rejected {
+						e.Event, e.Error = "error", "SIM changed"
+					}
+					w.ch <- e
+					c.Close()
+				}
+				p.fail = writeError
+				e, err := c.Call(context.Background(), map[string]any{"id": "request"}, true)
+				if rejected {
+					if e.Event != "error" || err == nil || errors.Is(err, ErrDisconnected) {
+						t.Fatalf("lost explicit rejection: event=%s err=%v", e.Event, err)
+					}
+				} else if err != nil || e.Submitted == nil || !*e.Submitted {
+					t.Fatalf("lost confirmed submission: event=%s err=%v", e.Event, err)
+				}
+			}
+		}
+	}
+}
+
+type replyThenClosePort struct {
+	write func()
+	fail  bool
+}
+
+func (p *replyThenClosePort) Read([]byte) (int, error) { return 0, io.EOF }
+func (p *replyThenClosePort) Close() error             { return nil }
+func (p *replyThenClosePort) Write(b []byte) (int, error) {
+	p.write()
+	if p.fail {
+		return len(b), io.EOF
+	}
+	return len(b), nil
+}
+
 func TestTimeoutDisconnectAndInvalidJSON(t *testing.T) {
 	host, device := net.Pipe()
 	c := NewConnection(host)

@@ -84,18 +84,39 @@ func (c *Connection) Call(ctx context.Context, request map[string]any, final boo
 	c.waiters[id] = w
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.waiters, id); c.mu.Unlock() }()
-	if err := c.Write(request); err != nil {
-		return domain.Envelope{}, err
-	}
-	select {
-	case e := <-w.ch:
+	result := func(e domain.Envelope) (domain.Envelope, error) {
 		if e.Event == "error" {
 			return e, errors.New("module rejected request: " + e.Error)
 		}
 		return e, nil
+	}
+	if err := c.Write(request); err != nil {
+		select {
+		case e := <-w.ch:
+			return result(e)
+		default:
+		}
+		return domain.Envelope{}, err
+	}
+	select {
+	case e := <-w.ch:
+		return result(e)
 	case <-ctx.Done():
+		select {
+		case e := <-w.ch:
+			return result(e)
+		default:
+		}
 		return domain.Envelope{}, ctx.Err()
 	case <-c.done:
+		// ReadLoop queues a final frame before closing done at EOF. Both
+		// channels may be ready: preserve the explicit outcome, not a random
+		// select choice which would turn a confirmed send into "unknown".
+		select {
+		case e := <-w.ch:
+			return result(e)
+		default:
+		}
 		return domain.Envelope{}, ErrDisconnected
 	}
 }
