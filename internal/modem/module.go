@@ -14,23 +14,31 @@ import (
 
 	"github.com/kxn/mobilemod/internal/config"
 	"github.com/kxn/mobilemod/internal/domain"
+	"github.com/kxn/mobilemod/internal/phone"
 	"github.com/kxn/mobilemod/internal/store"
 	"go.bug.st/serial"
 )
 
 type Snapshot struct {
-	ID       string          `json:"id"`
-	Port     string          `json:"port"`
-	Online   bool            `json:"online"`
-	Receiver string          `json:"receiver"`
-	Core     string          `json:"core"`
-	Protocol int             `json:"protocol"`
-	Network  int             `json:"network"`
-	CSQ      int             `json:"csq"`
-	Ready    bool            `json:"sms_ready"`
-	LastSeen time.Time       `json:"last_seen"`
-	Error    string          `json:"error,omitempty"`
-	Identity domain.Identity `json:"-"`
+	ID             string          `json:"id"`
+	Port           string          `json:"port"`
+	Online         bool            `json:"online"`
+	Receiver       string          `json:"receiver"`
+	Core           string          `json:"core"`
+	Protocol       int             `json:"protocol"`
+	Network        int             `json:"network"`
+	CSQ            int             `json:"csq"`
+	Ready          bool            `json:"sms_ready"`
+	LastSeen       time.Time       `json:"last_seen"`
+	Error          string          `json:"error,omitempty"`
+	Identity       domain.Identity `json:"-"`
+	SIMKey         string          `json:"sim_key"`
+	DetectedNumber string          `json:"detected_number"`
+	ManualNumber   string          `json:"manual_number"`
+	NumberSource   string          `json:"number_source"`
+	GuardedSend    bool            `json:"guarded_send"`
+	IncomingCalls  bool            `json:"incoming_calls"`
+	PassiveCalls   bool            `json:"passive_calls"`
 }
 type Module struct {
 	Config config.Module
@@ -47,9 +55,14 @@ type Module struct {
 }
 
 func New(cfg config.Module, db *store.Store, log *slog.Logger) *Module {
-	return &Module{Config: cfg, Store: db, Log: log, status: Snapshot{ID: cfg.ID, Port: cfg.Port, Receiver: config.Receiver("", cfg.Number, cfg.ID)}}
+	return &Module{Config: cfg, Store: db, Log: log, status: Snapshot{ID: cfg.ID, Port: cfg.Port, Receiver: cfg.ID, NumberSource: "module_id"}}
 }
-func (m *Module) Snapshot() Snapshot { m.mu.RLock(); defer m.mu.RUnlock(); return m.status }
+func (m *Module) Snapshot() Snapshot {
+	m.mu.RLock()
+	s := m.status
+	m.mu.RUnlock()
+	return m.resolveNumber(s)
+}
 func simHash(iccid string) string {
 	if iccid == "" {
 		return "unknown"
@@ -85,12 +98,16 @@ func (m *Module) acceptStatus(e domain.Envelope) error {
 		if err = tx.Put("settings", "device:"+m.Config.ID, e.DeviceID); err != nil {
 			return err
 		}
-		return tx.Put("settings", "physical:"+e.DeviceID, m.Config.ID)
+		if err := tx.Put("settings", "physical:"+e.DeviceID, m.Config.ID); err != nil {
+			return err
+		}
+		return m.seedNumber(tx, simHash(e.ICCID))
 	}); err != nil {
 		return err
 	}
-	s := Snapshot{ID: m.Config.ID, Port: m.Config.Port, Online: true, Receiver: config.Receiver(e.Number, m.Config.Number, m.Config.ID), Core: e.Core, Protocol: e.Protocol, Network: e.Network, CSQ: e.CSQ, Ready: e.SMSReady, LastSeen: time.Now()}
+	s := Snapshot{ID: m.Config.ID, Port: m.Config.Port, Online: true, DetectedNumber: e.Number, SIMKey: simHash(e.ICCID), Core: e.Core, Protocol: e.Protocol, Network: e.Network, CSQ: e.CSQ, Ready: e.SMSReady, LastSeen: time.Now(), GuardedSend: e.Protocol >= 3 && e.Capabilities["guarded_send"], IncomingCalls: e.Capabilities["incoming_calls"], PassiveCalls: e.Capabilities["passive_call_listener"]}
 	s.Identity = domain.Identity{Module: m.Config.ID, Receiver: s.Receiver, SIM: simHash(e.ICCID)}
+	s = m.resolveNumber(s)
 	m.mu.Lock()
 	m.status = s
 	m.mu.Unlock()
@@ -122,9 +139,9 @@ func (m *Module) received(ctx context.Context, c *Connection, e domain.Envelope)
 		identity.SIM = simHash(e.ICCID)
 		actual := e.Number
 		if actual == "" && identity.SIM == s.Identity.SIM {
-			actual = s.Receiver
+			actual = s.DetectedNumber
 		}
-		identity.Receiver = config.Receiver(actual, m.Config.Number, m.Config.ID)
+		identity.Receiver = m.resolveNumber(Snapshot{DetectedNumber: actual, SIMKey: identity.SIM}).Receiver
 	}
 	if err := m.Handle(ctx, identity, e); err != nil {
 		m.Log.Error("incoming SMS not acknowledged", "module", m.Config.ID, "reason", "persistence failed")
@@ -228,15 +245,18 @@ func safeError(err error) string {
 	}
 	return "serial/protocol error"
 }
-func (m *Module) Send(ctx context.Context, id, to, text string) (domain.Envelope, error) {
+func (m *Module) Send(ctx context.Context, id, to, text string, expected domain.Identity) (domain.Envelope, error) {
 	m.sendMu.Lock()
 	defer m.sendMu.Unlock()
 	m.mu.RLock()
 	c := m.conn
-	s := m.status
 	m.mu.RUnlock()
+	s := m.Snapshot()
 	if c == nil || !s.Online {
 		return domain.Envelope{}, errors.New("module offline")
+	}
+	if !s.GuardedSend || expected.SIM == "" || expected.SIM == "unknown" || s.Identity.SIM != expected.SIM || s.Receiver != expected.Receiver {
+		return domain.Envelope{}, ErrSIMChanged
 	}
 	// A fresh status query prevents a stale SIM binding from selecting the sender.
 	checkCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -245,8 +265,16 @@ func (m *Module) Send(ctx context.Context, id, to, text string) (domain.Envelope
 	if err != nil {
 		return domain.Envelope{}, err
 	}
-	if simHash(current.ICCID) != s.Identity.SIM {
-		return domain.Envelope{}, errors.New("SIM changed; retry only after checking module status")
+	if current.Protocol < 3 || !current.Capabilities["guarded_send"] || !current.SMSReady || current.ICCID == "" || simHash(current.ICCID) != expected.SIM {
+		return domain.Envelope{}, ErrSIMChanged
 	}
-	return c.Call(ctx, map[string]any{"cmd": "sms_send", "id": id, "to": to, "text": text}, true)
+	actual := m.resolveNumber(Snapshot{DetectedNumber: current.Number, SIMKey: simHash(current.ICCID)})
+	if actual.Receiver != expected.Receiver {
+		return domain.Envelope{}, ErrSIMChanged
+	}
+	out, err := c.Call(ctx, map[string]any{"cmd": "sms_send", "id": id, "to": phone.Normalize(to), "text": text, "expected_iccid": current.ICCID}, true)
+	if out.Event == "error" && out.Error == "SIM changed or expected SIM missing" {
+		return out, ErrSIMChanged
+	}
+	return out, err
 }

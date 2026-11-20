@@ -192,3 +192,29 @@ func TestNegativeMetadataIsPreservedAsInvalid(t *testing.T) {
 		t.Fatal(ms)
 	}
 }
+
+func TestCallNoticePreservesEventTimeAndNoReplyCorrelation(t *testing.T) {
+	a, _ := setup(t)
+	now := time.Now()
+	event := part(1, 0, 0, 0, "")
+	event.Event = "call_received"
+	event.From = ""
+	event.OccurredAt = now.Add(-time.Hour).Unix()
+	if err := a.Ingest(identity, event, now); err != nil {
+		t.Fatal(err)
+	}
+	ms := messages(t, a)
+	if len(ms) != 1 || ms[0].Kind != "call" || ms[0].ReceivedAt.Unix() != event.OccurredAt || ms[0].From == "" {
+		t.Fatal(ms)
+	}
+	event.MessageID = 2
+	event.OccurredAt = 0
+	if err := a.Ingest(identity, event, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range messages(t, a) {
+		if m.ID == domain.Key(identity.Module, event.BootID, "2") && m.TimeNote == "" {
+			t.Fatal("missing timestamp caveat")
+		}
+	}
+}

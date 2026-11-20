@@ -55,6 +55,19 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 			return err
 		}
 		base := domain.Message{ID: rawID, Identity: identity, From: e.From, Text: e.Text, ReceivedAt: now, Kind: "sms", State: "complete", Parts: 1, Expected: 1}
+		if e.Event == "call_received" {
+			base.Kind = "call"
+			base.Text = "仅记录来电事件，没有自动接听。"
+			if e.From == "" {
+				base.From = "未知（固件未提供来电号码）"
+			}
+			if e.OccurredAt >= 1600000000 && e.OccurredAt <= now.Add(5*time.Minute).Unix() {
+				base.ReceivedAt = time.Unix(e.OccurredAt, 0)
+			} else {
+				base.TimeNote = "设备未提供有效时间，以下为电脑收到通知的时间"
+			}
+			return notify.EnqueueMessage(tx, base, a.Recipients)
+		}
 		if e.Event == "mms_received" {
 			base.Kind = "mms"
 			base.State = "unsupported"

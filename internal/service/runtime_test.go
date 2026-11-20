@@ -65,7 +65,7 @@ func TestRuntimeSerialAssemblyToFeishuAndShutdown(t *testing.T) {
 		}
 		json.Unmarshal([]byte(body.Content), &content)
 		notifications <- content.Text
-		io.WriteString(w, `{"code":0}`)
+		io.WriteString(w, `{"code":0,"data":{"message_id":"forwarded-message","chat_id":"chat"}}`)
 	}))
 	defer api.Close()
 	r.Client.BaseURL = api.URL
@@ -122,7 +122,7 @@ func TestRuntimeSerialAssemblyToFeishuAndShutdown(t *testing.T) {
 	}
 	healthClient := &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
 	defer healthClient.CloseIdleConnections()
-	for _, endpoint := range []string{"/healthz", "/readyz"} {
+	for _, endpoint := range []string{"/healthz", "/readyz", "/api/status", "/"} {
 		res, e := healthClient.Get("http://" + cfg.HealthListen + endpoint)
 		if e != nil {
 			t.Fatal(e)

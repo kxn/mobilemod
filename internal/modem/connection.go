@@ -137,7 +137,7 @@ func (c *Connection) ReadLoop() error {
 				default:
 				}
 			}
-			if e.Event == "sms_received" || e.Event == "mms_received" || e.Event == "overflow" {
+			if e.Event == "sms_received" || e.Event == "mms_received" || e.Event == "call_received" || e.Event == "overflow" {
 				if c.OnEvent != nil {
 					c.OnEvent(e)
 				}

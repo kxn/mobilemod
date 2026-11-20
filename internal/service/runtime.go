@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kxn/mobilemod/internal/admin"
 	"log/slog"
 	"net"
 	"net/http"
@@ -42,6 +43,7 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 	}
 	r := &Runtime{Config: c, Store: db, Log: log, Client: feishu.New(c.Feishu.AppID, c.Feishu.AppSecret)}
 	r.Engine = &Engine{Config: c, Store: db, Modules: map[string]Device{}}
+	r.Engine.ParentLookup = r.Client
 	r.assembler = &sms.Assembler{Store: db, Recipients: c.Feishu.Recipients, Timeout: time.Duration(c.AssemblyTimeoutSeconds) * time.Second, MaxParts: c.MaxParts}
 	for _, cfg := range c.Modules {
 		m := modem.New(cfg, db, log)
@@ -90,6 +92,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return err
 		}
 		mux := http.NewServeMux()
+		mux.Handle("/", admin.New(r, listener.Addr().String()))
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
 			if req.Method != http.MethodGet {
 				w.WriteHeader(http.StatusMethodNotAllowed)

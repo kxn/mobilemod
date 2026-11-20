@@ -100,3 +100,45 @@ func TestMessageIncludesReceiverAndModule(t *testing.T) {
 		}
 	}
 }
+
+type trackedSender struct{ sender }
+
+func (s *trackedSender) SendTracked(ctx context.Context, to domain.Recipient, text, id string) (domain.Delivery, error) {
+	err := s.SendText(ctx, to, text, id)
+	return domain.Delivery{MessageID: "provider-message", ChatID: "chat"}, err
+}
+func TestReplyMappingSurvivesSourceRetentionAndRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state")
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	m := domain.Message{ID: domain.Key("source"), Identity: domain.Identity{Module: "one", Receiver: "+12025550100", SIM: "sim"}, From: "+12025550101", Kind: "sms", State: "complete", Text: "test", ReceivedAt: now}
+	if err = db.Update(func(tx *store.Tx) error {
+		return EnqueueMessage(tx, m, []domain.Recipient{{Type: "open_id", ID: "owner"}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.Update(func(tx *store.Tx) error { return tx.Delete("messages", m.ID) }); err != nil {
+		t.Fatal(err)
+	}
+	s := &trackedSender{}
+	w := Worker{Store: db, Sender: s, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if err = w.Tick(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	var link domain.ReplyTarget
+	if err = db.View(func(tx *store.Tx) error { return tx.Get("replies", "provider-message", &link) }); err != nil {
+		t.Fatal(err)
+	}
+	if link.Receiver != m.Identity.Receiver || link.From != m.From || link.ChatID != "chat" {
+		t.Fatal(link)
+	}
+}

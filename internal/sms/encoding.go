@@ -9,7 +9,7 @@ import (
 // ValidateShort checks SMS code units, not UTF-8 bytes. Extended GSM7 characters
 // occupy two septets. Non-BMP characters are refused for this UCS2-only driver.
 func ValidateShort(text string) error {
-	if text == "" || !utf8.ValidString(text) {
+	if strings.TrimSpace(text) == "" || !utf8.ValidString(text) {
 		return errors.New("短信正文为空或不是有效UTF-8")
 	}
 	const gsm = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"

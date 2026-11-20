@@ -45,7 +45,7 @@ func Normalize(event *larkim.P2MessageReceiveV1) (domain.Incoming, bool) {
 	if event.EventV2Base != nil && event.EventV2Base.Header != nil {
 		id = event.EventV2Base.Header.EventID
 	}
-	in := domain.Incoming{EventID: id, MessageID: str(m.MessageId), ChatID: str(m.ChatId), ChatType: str(m.ChatType), Sender: str(s.SenderId.OpenId), Text: body.Text, CreatedAt: time.UnixMilli(ms)}
+	in := domain.Incoming{EventID: id, MessageID: str(m.MessageId), ChatID: str(m.ChatId), ChatType: str(m.ChatType), Sender: str(s.SenderId.OpenId), Text: body.Text, CreatedAt: time.UnixMilli(ms), ParentID: str(m.ParentId)}
 	return in, in.MessageID != "" && in.ChatID != "" && in.Sender != ""
 }
 

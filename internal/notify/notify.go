@@ -16,8 +16,18 @@ import (
 type Sender interface {
 	SendText(context.Context, domain.Recipient, string, string) error
 }
+type TrackedSender interface {
+	SendTracked(context.Context, domain.Recipient, string, string) (domain.Delivery, error)
+}
 
 func Format(m domain.Message) string {
+	if m.Kind == "call" {
+		text := fmt.Sprintf("【来电通知】\n接收号码：%s\n模块：%s\n来电号码：%s\n时间：%s\n消息ID：%s\n\n%s", m.Identity.Receiver, m.Identity.Module, m.From, m.ReceivedAt.Format(time.RFC3339), m.ID, m.Text)
+		if m.TimeNote != "" {
+			text += "\n" + m.TimeNote
+		}
+		return text
+	}
 	state := map[string]string{"complete": "完整", "partial": "缺片，正文不完整", "ambiguous": "分片冲突，不能确认完整性", "invalid": "无效分片元数据", "unsupported": "当前模块不支持下载"}[m.State]
 	if state == "" {
 		state = m.State
@@ -44,7 +54,7 @@ func Split(text string, maxRunes int) []string {
 	}
 	return parts
 }
-func EnqueueText(tx *store.Tx, id string, to domain.Recipient, text string, now time.Time) error {
+func EnqueueText(tx *store.Tx, id string, to domain.Recipient, text string, now time.Time, sourceID ...string) error {
 	parts := Split(text, 2500)
 	for i, p := range parts {
 		key := domain.Key(id, to.Type, to.ID, fmt.Sprint(i))
@@ -54,7 +64,19 @@ func EnqueueText(tx *store.Tx, id string, to domain.Recipient, text string, now 
 		if len(parts) > 1 {
 			p = fmt.Sprintf("[转发 %d/%d]\n", i+1, len(parts)) + p
 		}
-		if err := tx.Put("outbox", key, domain.Outbox{ID: key, Recipient: to, Text: p, CreatedAt: now.Add(time.Duration(i)), NextAttempt: now}); err != nil {
+		source := ""
+		if len(sourceID) > 0 {
+			source = sourceID[0]
+		}
+		var reply *domain.ReplyTarget
+		if source != "" {
+			var m domain.Message
+			if err := tx.Get("messages", source, &m); err != nil {
+				return err
+			}
+			reply = &domain.ReplyTarget{SourceID: m.ID, Receiver: m.Identity.Receiver, From: m.From, SIM: m.Identity.SIM, Module: m.Identity.Module}
+		}
+		if err := tx.Put("outbox", key, domain.Outbox{ID: key, Recipient: to, Text: p, CreatedAt: now.Add(time.Duration(i)), NextAttempt: now, SourceID: source, Reply: reply}); err != nil {
 			return err
 		}
 	}
@@ -65,7 +87,11 @@ func EnqueueMessage(tx *store.Tx, m domain.Message, to []domain.Recipient) error
 		return err
 	}
 	for _, r := range to {
-		if err := EnqueueText(tx, "sms:"+m.ID, r, Format(m), m.ReceivedAt); err != nil {
+		source := ""
+		if m.Kind == "sms" {
+			source = m.ID
+		}
+		if err := EnqueueText(tx, "sms:"+m.ID, r, Format(m), m.ReceivedAt, source); err != nil {
 			return err
 		}
 	}
@@ -110,18 +136,45 @@ func (w Worker) Tick(ctx context.Context, now time.Time) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		err := w.Sender.SendText(ctx, item.Recipient, item.Text, item.ID)
+		var delivery domain.Delivery
+		var err error
+		if tracked, ok := w.Sender.(TrackedSender); ok {
+			delivery, err = tracked.SendTracked(ctx, item.Recipient, item.Text, item.ID)
+		} else {
+			err = w.Sender.SendText(ctx, item.Recipient, item.Text, item.ID)
+		}
+		if err == nil && item.SourceID != "" {
+			if _, ok := w.Sender.(TrackedSender); ok && (delivery.MessageID == "" || delivery.ChatID == "") {
+				err = fmt.Errorf("missing Feishu delivery identity")
+			}
+		}
 		item.Attempts++
 		if err == nil {
 			t := now
 			item.SentAt = &t
 			item.LastCode = ""
+			item.ProviderID = delivery.MessageID
+			item.ChatID = delivery.ChatID
 		} else {
 			item.LastCode = "delivery_failed"
 			item.NextAttempt = now.Add(Backoff(item.Attempts))
 			w.Log.Warn("Feishu delivery deferred", "notification", item.ID, "attempt", item.Attempts)
 		}
-		if e := w.Store.Update(func(tx *store.Tx) error { return tx.Put("outbox", item.ID, item) }); e != nil {
+		if e := w.Store.Update(func(tx *store.Tx) error {
+			if item.SentAt != nil && item.SourceID != "" && delivery.MessageID != "" {
+				if item.Reply == nil {
+					return fmt.Errorf("missing reply correlation data")
+				}
+				link := *item.Reply
+				link.MessageID = delivery.MessageID
+				link.ChatID = delivery.ChatID
+				link.CreatedAt = now
+				if err := tx.Put("replies", delivery.MessageID, link); err != nil {
+					return err
+				}
+			}
+			return tx.Put("outbox", item.ID, item)
+		}); e != nil {
 			return e
 		}
 	}

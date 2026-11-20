@@ -53,6 +53,7 @@ type Envelope struct {
 	Capabilities    map[string]bool `json:"capabilities,omitempty"`
 	Messages        []Envelope      `json:"messages,omitempty"`
 	ContentLocation string          `json:"content_location,omitempty"`
+	OccurredAt      int64           `json:"occurred_at,omitempty"`
 }
 
 type Message struct {
@@ -66,17 +67,41 @@ type Message struct {
 	Parts      int       `json:"parts"`
 	Expected   int       `json:"expected"`
 	Missing    []int     `json:"missing,omitempty"`
+	TimeNote   string    `json:"time_note,omitempty"`
 }
 
 type Outbox struct {
-	ID          string     `json:"id"`
-	Recipient   Recipient  `json:"recipient"`
-	Text        string     `json:"text"`
-	CreatedAt   time.Time  `json:"created_at"`
-	NextAttempt time.Time  `json:"next_attempt"`
-	Attempts    int        `json:"attempts"`
-	SentAt      *time.Time `json:"sent_at,omitempty"`
-	LastCode    string     `json:"last_code,omitempty"`
+	ID          string       `json:"id"`
+	Recipient   Recipient    `json:"recipient"`
+	Text        string       `json:"text"`
+	CreatedAt   time.Time    `json:"created_at"`
+	NextAttempt time.Time    `json:"next_attempt"`
+	Attempts    int          `json:"attempts"`
+	SentAt      *time.Time   `json:"sent_at,omitempty"`
+	LastCode    string       `json:"last_code,omitempty"`
+	SourceID    string       `json:"source_id,omitempty"`
+	ProviderID  string       `json:"provider_id,omitempty"`
+	ChatID      string       `json:"chat_id,omitempty"`
+	Reply       *ReplyTarget `json:"reply,omitempty"`
+}
+
+type Delivery struct {
+	MessageID string `json:"message_id"`
+	ChatID    string `json:"chat_id"`
+}
+type PostedMessage struct {
+	MessageID, ChatID, Text string
+	OwnBot                  bool
+}
+type ReplyTarget struct {
+	MessageID string    `json:"message_id"`
+	SourceID  string    `json:"source_id"`
+	ChatID    string    `json:"chat_id"`
+	Receiver  string    `json:"receiver"`
+	From      string    `json:"from"`
+	SIM       string    `json:"sim"`
+	Module    string    `json:"module,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Incoming struct {
@@ -87,6 +112,7 @@ type Incoming struct {
 	Sender    string    `json:"sender"`
 	Text      string    `json:"text"`
 	CreatedAt time.Time `json:"created_at"`
+	ParentID  string    `json:"parent_id,omitempty"`
 }
 
 type CommandJob struct {
@@ -104,4 +130,6 @@ type SendRecord struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Error     string    `json:"error,omitempty"`
+	From      string    `json:"from,omitempty"`
+	SIM       string    `json:"sim,omitempty"`
 }

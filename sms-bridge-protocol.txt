@@ -1,4 +1,4 @@
-USB SMS bridge 0.2.0 / protocol 2
+USB SMS bridge 0.3.1 / protocol 3
 
 Target: LuatOS-SoC_V2044_Air780EPM_106.soc, Lua 5.3 64-bit.
 USB MI_06 application UART, 115200 8N1. UTF-8 JSON objects, newline terminated.
@@ -10,12 +10,13 @@ Requests always have a correlation id. Commands:
 {"cmd":"ping","id":"probe-1"}
 {"cmd":"status","id":"probe-2"}
 {"cmd":"inbox","id":"probe-3"}
-{"cmd":"sms_send","id":"unique-request-id","to":"DESTINATION_NUMBER","text":"test"}
+{"cmd":"sms_send","id":"unique-request-id","to":"DESTINATION_NUMBER","text":"test","expected_iccid":"CURRENT_SIM_ID"}
 {"cmd":"ack","id":"ack-1","boot_id":"5","message_id":42}
 
-status includes protocol=2, device_id (IMEI), core, version, boot_id, number (optional),
+status includes protocol=3, device_id (IMEI), core, version, boot_id, number (optional),
 iccid (optional), SMS readiness, network, csq, inbox_count, durable, drops,
-capabilities. Host requires protocol >=2 and persists physical-device binding.
+capabilities. Host can read protocol >=2; sending requires protocol >=3 and
+guarded_send=true. The module checks expected_iccid immediately before SMS API.
 inbox returns at most four retained events per request; empty messages is omitted.
 
 Incoming event:
@@ -49,6 +50,11 @@ ledger. One pending send is allowed. At 90 seconds result becomes unknown; the s
 stays blocked until the callback or reboot. Never automatically retransmit after a
 timeout/disconnect. SMS_READY/SMS_SENT are core callbacks. Events interleave replies.
 
-Call forwarding and MMS capabilities are false. A future driver may supply
+Call forwarding and MMS capabilities are false. passive_call_listener=true means
+CC_IND is subscribed, not guaranteed hardware support. incoming_calls becomes true
+only after observing INCOMINGCALL in this boot. call_received events use the same
+durable inbox/ACK protocol and include optional occurred_at (Unix seconds), from,
+number and iccid. Unknown caller is an empty string. No call is automatically
+answered, initialized, dialed or hung up. A future driver may supply
 mms_received/content_location for a rendered notice; current firmware cannot expose
 or download MMS binary payloads.

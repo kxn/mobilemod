@@ -191,10 +191,12 @@ func TestModuleRunPersistentIngestAckAndSend(t *testing.T) {
 			switch q["cmd"] {
 			case "status":
 				reply["event"] = "status"
-				reply["protocol"] = 2
+				reply["protocol"] = 3
+				reply["capabilities"] = map[string]bool{"guarded_send": true}
 				reply["device_id"] = "dev"
 				reply["iccid"] = "sim"
 				reply["network"] = 1
+				reply["sms_ready_event_seen"] = true
 				reply["core"] = "V2044"
 			case "inbox":
 				reply["event"] = "inbox"
@@ -206,6 +208,9 @@ func TestModuleRunPersistentIngestAckAndSend(t *testing.T) {
 				acks <- true
 				reply["event"] = "ack"
 			case "sms_send":
+				if q["expected_iccid"] != "sim" {
+					t.Error("missing physical SIM guard")
+				}
 				reply["event"] = "sms_result"
 				reply["submitted"] = true
 			}
@@ -230,7 +235,7 @@ func TestModuleRunPersistentIngestAckAndSend(t *testing.T) {
 	}
 	callCtx, end := context.WithTimeout(ctx, time.Second)
 	defer end()
-	out, e := m.Send(callCtx, "test-send", "50000", "101")
+	out, e := m.Send(callCtx, "test-send", "50000", "101", m.Snapshot().Identity)
 	if e != nil || out.Submitted == nil || !*out.Submitted {
 		t.Fatal(out, e)
 	}
@@ -239,5 +244,44 @@ func TestModuleRunPersistentIngestAckAndSend(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("module failed to shut down")
+	}
+}
+
+func TestFreshStatusRejectsSIMSwapBeforeSMSWrite(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m := New(config.Module{ID: "one"}, db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	status := domain.Envelope{Protocol: 3, DeviceID: "physical", ICCID: "old-sim", Number: "+12025550100", SMSReady: true, Capabilities: map[string]bool{"guarded_send": true}}
+	if err = m.acceptStatus(status); err != nil {
+		t.Fatal(err)
+	}
+	expected := m.Snapshot().Identity
+	host, device := net.Pipe()
+	c := NewConnection(host)
+	m.conn = c
+	defer c.Close()
+	go c.ReadLoop()
+	commands := make(chan string, 4)
+	go func() {
+		defer device.Close()
+		scan := bufio.NewScanner(device)
+		for scan.Scan() {
+			var q map[string]any
+			json.Unmarshal(scan.Bytes(), &q)
+			commands <- q["cmd"].(string)
+			b, _ := json.Marshal(map[string]any{"id": q["id"], "event": "status", "iccid": "replacement-sim"})
+			device.Write(append(b, '\n'))
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err = m.Send(ctx, "request", "50000", "test", expected); !errors.Is(err, ErrSIMChanged) {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || <-commands != "status" {
+		t.Fatal("SMS written despite changed SIM")
 	}
 }

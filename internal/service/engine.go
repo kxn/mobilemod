@@ -14,18 +14,22 @@ import (
 	"github.com/kxn/mobilemod/internal/forwarding"
 	"github.com/kxn/mobilemod/internal/modem"
 	"github.com/kxn/mobilemod/internal/notify"
+	"github.com/kxn/mobilemod/internal/phone"
 	"github.com/kxn/mobilemod/internal/sms"
 	"github.com/kxn/mobilemod/internal/store"
 )
 
 type Device interface {
 	Snapshot() modem.Snapshot
-	Send(context.Context, string, string, string) (domain.Envelope, error)
+	Send(context.Context, string, string, string, domain.Identity) (domain.Envelope, error)
 }
 type Engine struct {
-	Config  config.Config
-	Store   *store.Store
-	Modules map[string]Device
+	Config       config.Config
+	Store        *store.Store
+	Modules      map[string]Device
+	ParentLookup interface {
+		LookupMessage(context.Context, string) (domain.PostedMessage, error)
+	}
 }
 
 func contains(values []string, s string) bool {
@@ -127,6 +131,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 	if time.Since(job.CreatedAt) > 5*time.Minute {
 		return e.reply(job, "命令排队超过5分钟，已过期，未执行。")
 	}
+	if job.Incoming.ParentID != "" {
+		return e.handleSMSReply(ctx, job)
+	}
 	c, err := bot.Parse(job.Incoming.Text)
 	if err != nil {
 		return e.reply(job, err.Error())
@@ -137,8 +144,8 @@ func (e *Engine) Tick(ctx context.Context) error {
 		result = bot.Help
 	case "modules", "status":
 		var ids []string
-		for id := range e.Modules {
-			if c.Module == "" || c.Module == id {
+		for id, d := range e.Modules {
+			if c.Module == "" || c.Module == id || phone.Equal(c.Module, d.Snapshot().Receiver) {
 				ids = append(ids, id)
 			}
 		}
@@ -149,51 +156,68 @@ func (e *Engine) Tick(ctx context.Context) error {
 		for _, id := range ids {
 			s := e.Modules[id].Snapshot()
 			result += fmt.Sprintf("模块：%s\n接收号码：%s\n在线：%t；网络：%d；CSQ：%d；短信就绪：%t\n固件：%s；协议：%d\n彩信下载：不支持\n\n", id, s.Receiver, s.Online, s.Network, s.CSQ, s.Ready, s.Core, s.Protocol)
-		}
-	case "sms", "forward":
-		device, exists := e.Modules[c.Module]
-		if !exists {
-			return e.reply(job, "模块ID不存在")
-		}
-		if c.Kind == "forward" {
-			var cfg config.Forwarding
-			for _, m := range e.Config.Modules {
-				if m.ID == c.Module {
-					cfg = m.Forwarding
-				}
-			}
-			c.To, c.Text, err = forwarding.Build(cfg, c)
-			if err != nil {
-				return e.reply(job, err.Error())
+			if s.IncomingCalls {
+				result += "来电通知：已观察到来电事件\n"
+			} else if s.PassiveCalls {
+				result += "来电通知：被动监听，本次开机未观察到来电事件\n"
+			} else {
+				result += "来电通知：未启用被动监听\n"
 			}
 		}
-		result = e.submit(ctx, device, job.Incoming.MessageID, c.Module, c.To, c.Text)
-		if c.Kind == "forward" {
-			result += "\n这是运营商业务短信提交结果；呼转实际状态必须以运营商确认回复为准。"
+	case "sms":
+		return e.reply(job, e.submitFrom(ctx, job.Incoming.MessageID, c.From, c.To, c.Text))
+	case "forward":
+		device, state, sourceErr := e.source(c.From)
+		if sourceErr != nil {
+			return e.reply(job, sourceErr.Error())
 		}
+		var cfg config.Forwarding
+		for _, m := range e.Config.Modules {
+			if m.ID == state.ID {
+				cfg = m.Forwarding
+			}
+		}
+		c.To, c.Text, err = forwarding.Build(cfg, c)
+		if err != nil {
+			return e.reply(job, err.Error())
+		}
+		result = e.submitExpected(ctx, device, job.Incoming.MessageID, state.ID, c.To, c.Text, state)
+		result += "\n这是运营商业务短信提交结果；呼转实际状态必须以运营商确认回复为准。"
 	}
 	return e.reply(job, result)
 }
 func (e *Engine) submit(ctx context.Context, device Device, commandID, module, to, text string) string {
+	return e.submitExpected(ctx, device, commandID, module, to, text, device.Snapshot())
+}
+func (e *Engine) submitExpected(ctx context.Context, device Device, commandID, module, to, text string, s modem.Snapshot) string {
 	if err := sms.ValidateShort(text); err != nil {
 		return err.Error()
 	}
 	if !config.ValidNumber(to) {
 		return "目标号码无效"
 	}
-	if len(e.Config.AllowedDestinations) > 0 && !contains(e.Config.AllowedDestinations, to) {
+	to = phone.Normalize(to)
+	allowed := len(e.Config.AllowedDestinations) == 0
+	for _, n := range e.Config.AllowedDestinations {
+		if phone.Equal(n, to) {
+			allowed = true
+		}
+	}
+	if !allowed {
 		return "目标号码不在允许列表中"
 	}
-	s := device.Snapshot()
 	if !s.Online {
 		return "模块离线，未发送"
 	}
 	if !s.Ready {
 		return "模块短信功能尚未就绪，未发送"
 	}
+	if !s.GuardedSend {
+		return "模块固件不支持发送前SIM校验，请升级桥接程序至协议3，未发送"
+	}
 	now := time.Now()
 	id := domain.Key("send", commandID)
-	record := domain.SendRecord{ID: id, Module: module, To: to, Text: text, State: "unknown", CreatedAt: now, UpdatedAt: now}
+	record := domain.SendRecord{ID: id, Module: module, To: to, Text: text, State: "unknown", CreatedAt: now, UpdatedAt: now, From: s.Receiver, SIM: s.Identity.SIM}
 	err := e.Store.Update(func(tx *store.Tx) error {
 		if tx.Has("sends", id) {
 			return errors.New("该命令已有发送记录；为避免重复扣费，不会重发")
@@ -222,8 +246,11 @@ func (e *Engine) submit(ctx context.Context, device Device, commandID, module, t
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, 110*time.Second)
 	defer cancel()
-	out, err := device.Send(sendCtx, id, to, text)
-	if err != nil {
+	out, err := device.Send(sendCtx, id, to, text, s.Identity)
+	if errors.Is(err, modem.ErrSIMChanged) {
+		record.State = "rejected"
+		record.Error = "source SIM/number changed before send"
+	} else if err != nil {
 		record.State = "unknown"
 		record.Error = "connection or timeout; not automatically retried"
 	} else if out.Submitted != nil {
@@ -243,6 +270,9 @@ func (e *Engine) submit(ctx context.Context, device Device, commandID, module, t
 	case "submitted":
 		return fmt.Sprintf("短信已提交给短信中心。\n模块：%s\n发送号码：%s\n目标号码：%s\n请求ID：%s\n这不代表接收手机已收到。", module, s.Receiver, to, id)
 	case "rejected":
+		if record.Error != "" {
+			return "SIM或发送号码已变化，未发送；请刷新模块状态。请求ID：" + id
+		}
 		return "短信提交失败，未自动重试。请求ID：" + id
 	default:
 		return "短信结果未知，未自动重试。请检查手机与记录，避免重复扣费。请求ID：" + id
@@ -261,12 +291,18 @@ func (e *Engine) LocalSend(ctx context.Context, module, to, text string, id stri
 func (e *Engine) Cleanup(now time.Time) error {
 	cutoff := now.Add(-time.Duration(e.Config.RetentionDays) * 24 * time.Hour)
 	return e.Store.Update(func(tx *store.Tx) error {
-		for _, bucket := range []string{"raw", "messages", "outbox", "commands", "sends", "groups"} {
+		for _, bucket := range []string{"raw", "messages", "outbox", "commands", "sends", "groups", "replies"} {
 			var keys []string
 			if err := tx.Scan(bucket, func(k string, b []byte) error {
 				var at time.Time
 				safe := true
 				switch bucket {
+				case "replies":
+					var v domain.ReplyTarget
+					if err := json.Unmarshal(b, &v); err != nil {
+						return err
+					}
+					at = v.CreatedAt
 				case "raw":
 					var v sms.Raw
 					if err := json.Unmarshal(b, &v); err != nil {

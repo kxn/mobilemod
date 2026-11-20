@@ -84,11 +84,40 @@ func TestNormalizeUserTextOnly(t *testing.T) {
 	if !ok || in.EventID != "ev" || in.Text != "/help" {
 		t.Fatal(in, ok)
 	}
+	e.Event.Message.ParentId = ptr("quoted")
+	e.Event.Message.Content = ptr(`{"text":"  reply\ntrailing  "}`)
+	if in, ok = Normalize(e); !ok || in.ParentID != "quoted" || in.Text != "  reply\ntrailing  " {
+		t.Fatal("reply metadata/whitespace lost", in)
+	}
 	e.Event.Sender.SenderType = ptr("app")
 	if _, ok = Normalize(e); ok {
 		t.Fatal("accepted bot echo")
 	}
 	if _, ok = Normalize(nil); ok {
 		t.Fatal("accepted nil")
+	}
+}
+
+func TestLegacyMessageLookupVerifiesAppSender(t *testing.T) {
+	for _, own := range []bool{true, false} {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "GET" || r.Header.Get("Authorization") != "Bearer cached" {
+				t.Error("unexpected lookup request")
+			}
+			id := "other-app"
+			if own {
+				id = "app"
+			}
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"items": []any{map[string]any{"message_id": "parent", "chat_id": "chat", "msg_type": "text", "sender": map[string]string{"id": id, "id_type": "app_id", "sender_type": "app"}, "body": map[string]string{"content": `{"text":"body  "}`}}}}})
+		}))
+		c := New("app", "secret")
+		c.BaseURL = s.URL
+		c.token = "cached"
+		c.expires = time.Now().Add(time.Hour)
+		m, err := c.LookupMessage(context.Background(), "parent")
+		s.Close()
+		if err != nil || m.OwnBot != own || m.Text != "body  " {
+			t.Fatal(m, err)
+		}
 	}
 }

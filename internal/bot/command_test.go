@@ -6,14 +6,14 @@ import (
 )
 
 func TestParse(t *testing.T) {
-	tests := []struct{ in, kind, module string }{{"/help", "help", ""}, {"/status m1", "status", "m1"}, {"/modules", "modules", ""}, {"/sms m1 +12025550100 你好\n第二行", "sms", "m1"}, {"@_user_1 /sms m2 50000 101", "sms", "m2"}, {"/forward m1 query", "forward", "m1"}, {"/forward m1 set busy +12025550100", "forward", "m1"}, {"/forward m1 cancel all", "forward", "m1"}}
+	tests := []struct{ in, kind, module string }{{"/help", "help", ""}, {"/status m1", "status", "m1"}, {"/modules", "modules", ""}, {"/sms +12025550100 +12025550100 你好\n第二行", "sms", ""}, {"@_user_1 /sms +12025550101 50000 101", "sms", ""}, {"/forward +12025550100 query", "forward", ""}, {"/forward +12025550100 set busy +12025550100", "forward", ""}, {"/forward +12025550100 cancel all", "forward", ""}}
 	for _, c := range tests {
 		got, e := Parse(c.in)
 		if e != nil || got.Kind != c.kind || got.Module != c.module {
 			t.Fatal(c, got, e)
 		}
 	}
-	c, _ := Parse("/sms m1 50000 a  b\n正文")
+	c, _ := Parse("/sms +12025550100 50000 a  b\n正文")
 	if c.Text != "a  b\n正文" {
 		t.Fatal(c.Text)
 	}
@@ -26,12 +26,25 @@ func TestRejectMalformedCommands(t *testing.T) {
 	}
 }
 func FuzzParse(f *testing.F) {
-	f.Add("/sms m1 50000 101")
-	f.Add("/forward m1 query")
+	f.Add("/sms +12025550100 50000 101")
+	f.Add("/forward +12025550100 query")
 	f.Fuzz(func(t *testing.T, s string) {
 		if len(s) > 20000 {
 			t.Skip()
 		}
 		_, _ = Parse(s)
 	})
+}
+
+func TestSMSPayloadWhitespaceAndNationalNumbers(t *testing.T) {
+	cn := "1" + "3" + strings.Repeat("0", 9)
+	for _, body := range []string{"正文  内部空格  ", " 第一行\n第二行\t  ", "/help 不是命令\r\n"} {
+		c, err := Parse("/sms " + cn + " " + cn + " " + body)
+		if err != nil || c.From != "+86"+cn || c.To != "+86"+cn || c.Text != body {
+			t.Fatalf("payload changed: %q %v", c.Text, err)
+		}
+	}
+	if _, err := Parse("/sms " + cn + " " + cn + "   \n\t "); err == nil {
+		t.Fatal("blank-only SMS accepted")
+	}
 }

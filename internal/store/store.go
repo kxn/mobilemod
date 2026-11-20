@@ -13,7 +13,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var buckets = []string{"raw", "groups", "messages", "outbox", "commands", "sends", "settings"}
+var buckets = []string{"raw", "groups", "messages", "outbox", "commands", "sends", "settings", "number_bindings", "replies"}
 
 type Store struct{ db *bolt.DB }
 type Tx struct{ tx *bolt.Tx }

@@ -1,0 +1,86 @@
+'use strict';
+const cards = new Map();
+let token = '';
+let busy = false;
+let nextCard = 0;
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+const setNotice = text => { document.querySelector('#notice').textContent = text; };
+function makeCard(id) {
+  const card = el('article', 'module');
+  const head = el('div', 'module-head');
+  const title = el('div');
+  title.append(el('h3', '', id));
+  const port = el('div', 'port'); title.append(port);
+  const badge = el('span', 'badge');head.append(title, badge);
+  const details = el('div', 'details');
+  const number = el('div', 'number');const source = el('div', 'source');
+  const facts = el('div', 'facts');
+  const values = {};
+  for (const [key, label] of [['network','网络注册'], ['signal','信号 CSQ'], ['sms','短信发送'], ['calls','来电通知']]) {
+    const fact = el('div', 'fact'); const value = el('span');fact.append(el('span','',label),value);facts.append(fact);values[key]=value;
+  }
+  const form = el('form');const input = el('input');
+  const inputId = 'number-' + nextCard++;input.id=inputId;input.type='tel';input.placeholder='无法自动读取时填写';input.maxLength=24;input.autocomplete='off';
+  const label=el('label','','手工备用号码');label.htmlFor=inputId;
+  const save=el('button','save','保存');save.type='submit';
+  const row=el('div','input-row');row.append(input,save);
+  const hint=el('p','small','留空可清除手工号码。自动读取正常时，备用号码不参与选卡。');
+  const message=el('div','message');message.setAttribute('role','status');
+  form.append(label,row,hint,message);details.append(number,source,facts,form);card.append(head,details);
+  const state={card,port,badge,number,source,values,input,save,message,sim:null,dirty:false,saving:false};
+  input.addEventListener('input',()=>{state.dirty=true;});
+  form.addEventListener('submit',async event=>{
+    event.preventDefault();if(state.saving)return;state.saving=true;save.disabled=true;message.textContent='正在保存…';
+    try {
+      const response=await fetch('/api/modules/'+encodeURIComponent(id)+'/number',{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:JSON.stringify({sim_key:state.sim,number:input.value})});
+      if(!response.ok)throw new Error(await response.text());
+      state.dirty=false;message.textContent='已保存到当前 SIM';message.className='message ok';
+      await refresh();
+    }catch(error){message.textContent=error.message;message.className='message warn';}
+    finally{state.saving=false;save.disabled=input.disabled;}
+  });
+  return state;
+}
+function render(status){
+  token=status.csrf;
+  const online=status.modules.filter(m=>m.online).length;
+  const feishu=document.querySelector('#feishu');feishu.textContent=status.feishu?'已连接':'未连接';feishu.className=status.feishu?'ok':'off';
+  document.querySelector('#online').textContent=online+' / '+status.modules.length;
+  document.querySelector('#pending').textContent=String(status.pending_notifications);
+  const container=document.querySelector('#modules');if(!cards.size)container.replaceChildren();
+  const active=new Set(status.modules.map(m=>m.id));
+  for(const [id,c] of cards){if(!active.has(id)){c.card.remove();cards.delete(id);}}
+  const numberCounts=new Map();for(const m of status.modules){if(m.online&&m.number_source!=='module_id')numberCounts.set(m.receiver,(numberCounts.get(m.receiver)||0)+1);}
+  for(const m of status.modules){
+    let c=cards.get(m.id);if(!c){c=makeCard(m.id);cards.set(m.id,c);container.append(c.card);}
+    const changed=c.sim!==m.sim_key;
+    if(changed){if(c.sim!==null&&c.dirty){c.message.textContent='SIM 已变化，未保存的号码已清除';c.message.className='message warn';}c.sim=m.sim_key;c.dirty=false;}
+    c.port.textContent=m.port+' · '+(m.core||'等待固件状态');
+    c.badge.textContent=m.online?'在线':'离线';c.badge.className='badge'+(m.online?'':' offline');
+    c.number.textContent=m.number_source==='module_id'?'号码待设置':m.receiver;
+    const sources={sim:'由 SIM 自动读取',manual:'使用手工备用号码',module_id:'尚无接收号码，短信会标注模块 ID',unavailable:'号码存储暂不可用'};
+    c.source.textContent=sources[m.number_source]||'—';
+    if(numberCounts.get(m.receiver)>1){c.source.textContent+=' · 号码重复，发送会被拒绝';c.source.className='source warn';}else c.source.className='source';
+    c.values.network.textContent=({1:'已注册',5:'已注册（漫游）'})[m.network]||'等待注册';
+    c.values.signal.textContent=m.online?String(m.csq):'—';
+    c.values.sms.textContent=!m.guarded_send?'需升级桥接程序':(m.sms_ready?'已就绪':'等待就绪');
+    c.values.calls.textContent=m.incoming_calls?'已观察到来电事件':(m.passive_calls?'监听中，未观察到来电事件':'未启用被动监听');
+    if(!c.dirty&&!c.saving)c.input.value=m.manual_number||'';
+    c.input.disabled=!m.online||!m.sim_key||m.sim_key==='unknown';
+    c.save.disabled=c.input.disabled||c.saving;
+  }
+  document.querySelector('#updated').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN');
+}
+async function refresh(){
+  if(busy)return;busy=true;
+  try{const response=await fetch('/api/status',{cache:'no-store'});if(!response.ok)throw new Error('暂时无法读取网关状态');render(await response.json());setNotice('');}
+  catch(error){setNotice(error.message);}
+  finally{busy=false;}
+}
+document.querySelector('#refresh').addEventListener('click',refresh);
+refresh();setInterval(refresh,5000);

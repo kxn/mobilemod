@@ -19,11 +19,11 @@ CI 在 push main、Pull Request 或手动触发时运行；发布 workflow 复�
 在 main 上更新代码及文档，推送符合语义版本格式的 tag：
 
 ```sh
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
-Release workflow 会先运行：公开文件与全历史敏感信息扫描、四种 runner 测试、Linux race、静态检查、漏洞检查、模糊测试，以及五目标打包。通过后才创建 draft Release、上传包和 `SHA256SUMS`，最后公开发布。带预发布后缀的 tag（如 `v0.3.1-rc.1`）标为 prerelease。
+Release workflow 会先运行：公开文件与全历史敏感信息扫描、四种 runner 测试、Linux race、静态检查、漏洞检查、模糊测试，以及五目标打包。通过后才创建 draft Release、上传包和 `SHA256SUMS`，最后公开发布。带预发布后缀的 tag（如 `v0.4.1-rc.1`）标为 prerelease。
 
 失败可在 GitHub 重新运行 workflow；已公开的同版本 Release 不会被自动覆盖，须发新 tag。只有 publish job 获得 contents:write；PR 流程不授予写权限、不使用个人凭据。Actions 固定到完整 commit SHA，Dependabot 会为版本更新提出 PR。
 
@@ -34,8 +34,8 @@ Release workflow 会先运行：公开文件与全历史敏感信息扫描、四
 从仓库根目录运行：
 
 ```sh
-go run ./tools/release -version v0.3.0 -output dist/releases/v0.3.0
-go run ./tools/release -version v0.3.0 -targets linux/amd64,linux/arm64 -output dist/linux
+go run ./tools/release -version v0.4.0 -output dist/releases/v0.4.0
+go run ./tools/release -version v0.4.0 -targets linux/amd64,linux/arm64 -output dist/linux
 ```
 
 包内仅包含二进制、README、LICENSE、配置模板、部署文件、文档、USB 协议、Lua 程序和第三方许可。不包含源码测试中的虚构凭据、私有配置、联调记录、数据库或下载的厂商固件。完整源码可从仓库及 GitHub 自动生成的 source archive 获取。

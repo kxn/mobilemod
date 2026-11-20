@@ -2,6 +2,8 @@ sys = require "sys"
 local port = uart.VUART_0
 local input, inbox = "", {}
 local pending, sms_ready = nil, false
+local sms_ready_iccid
+local incoming_observed, call_active, call_started = false, false, 0
 local MAX_QUEUE = 64
 local JOURNAL = "/sms-gateway-inbox.jsonl"
 local journal_writes = 0
@@ -62,7 +64,7 @@ do
                 local ok,event=pcall(json.decode,line)
                 if ok and type(event)=="table"then
                     if event.event=="ack_record"then records[event.message_id]=nil
-                    elseif event.message_id and event.event=="sms_received"then
+                    elseif event.message_id and (event.event=="sms_received" or event.event=="call_received")then
                         records[event.message_id]=event
                         next_message=math.max(next_message,event.message_id)
                     end
@@ -75,14 +77,15 @@ do
     table.sort(inbox,function(a,b)return a.message_id<b.message_id end)
 end
 local function status()
-    return {event="status",protocol=2,project=PROJECT,version=VERSION,
+    return {event="status",protocol=3,project=PROJECT,version=VERSION,
         core=rtos.version(),bsp=rtos.bsp(),device_id=device_id,boot_id=boot_id,
         number=safe_number(),iccid=api(mobile.iccid),sim_present=api(mobile.iccid)~=nil,
         network=api(mobile.status),csq=api(mobile.csq),rsrp=api(mobile.rsrp),
-        sms_ready_event_seen=sms_ready,inbox_count=#inbox,durable=durable,
+        sms_ready_event_seen=sms_ready and sms_ready_iccid~=nil and sms_ready_iccid~="" and sms_ready_iccid==api(mobile.iccid),inbox_count=#inbox,durable=durable,
         drops=drops,pending_id=pending and pending.id or nil,
         capabilities={sms=true,fragments=true,persistent_inbox=durable,
-            number_from_sim=type(mobile.number)=="function",call_forwarding=false,mms=false}}
+            number_from_sim=type(mobile.number)=="function",guarded_send=true,incoming_calls=incoming_observed,passive_call_listener=true,
+            call_api_present=type(cc)=="table" and type(cc.lastNum)=="function",call_forwarding=false,mms=false}}
 end
 local function valid_id(id)
     return type(id)=="string" and #id>=1 and #id<=40 and id:match("^[%w_-]+$")
@@ -101,7 +104,7 @@ end
 local function handle(r)
     if type(r)~="table" or type(r.cmd)~="string" then emit({event="error",error="invalid request"});return end
     local id=r.id or ""
-    if r.cmd=="ping" then emit({event="pong",id=id,protocol=2,version=VERSION})
+    if r.cmd=="ping" then emit({event="pong",id=id,protocol=3,version=VERSION})
     elseif r.cmd=="status" then local s=status();s.id=id;emit(s)
     elseif r.cmd=="inbox" then
         local items={}
@@ -126,6 +129,10 @@ local function handle(r)
         if pending then emit({event="error",id=id,error="send pending; do not retry"});return end
         local digits=type(r.to)=="string" and r.to:gsub("^%+","")or ""
         if not digits:match("^%d+$")or #digits<5 or #digits>20 then emit({event="error",id=id,error="invalid number"});return end
+        if type(r.expected_iccid)~="string" or r.expected_iccid=="" or r.expected_iccid~=api(mobile.iccid) then
+            emit({event="error",id=id,error="SIM changed or expected SIM missing"});return
+        end
+        if not sms_ready or sms_ready_iccid~=r.expected_iccid then emit({event="error",id=id,error="SMS not ready for current SIM"});return end
         if type(r.text)~="string"or #r.text<1 or #r.text>480 then emit({event="error",id=id,error="invalid SMS text"});return end
         if not save_send(id,{event="sms_result",id=id,state="unknown",error="interrupted send; not retried"})then
             emit({event="error",id=id,error="cannot persist send intent"});return
@@ -161,20 +168,41 @@ uart.on(port,"receive",function(id,length)
     end
 end)
 sms.autoLong(false)
-sms.setNewSmsCb(function(number,text,metadata)
+local function enqueue(kind,number,text,metadata,occurred)
     if #inbox>=MAX_QUEUE then
         drops=drops+1;put("gw_drops",drops);emit({event="overflow",drops=drops});return
     end
     next_message=next_message+1
     put("gw_next",next_message)
-    local event={event="sms_received",message_id=next_message,boot_id=boot_id,
+    local event={event=kind,message_id=next_message,boot_id=boot_id,
         device_id=device_id,from=number,text=text,metadata=metadata,
-        number=safe_number(),iccid=api(mobile.iccid),durable=durable}
+        number=safe_number(),iccid=api(mobile.iccid),durable=durable,occurred_at=occurred}
     if durable and not append_record(event)then event.durable=false end
     inbox[#inbox+1]=event
     emit(event)
+end
+sms.setNewSmsCb(function(number,text,metadata)enqueue("sms_received",number,text,metadata)end)
+-- Passive observation only. No cc.init/accept/dial/hangUp and no VoLTE settings.
+-- Some builds publish CC_IND from mobile even when the cc Lua library is absent.
+-- This listener does not prove that the modem/carrier will emit incoming events.
+sys.subscribe("CC_IND",function(state,...)
+    if state=="INCOMINGCALL"then
+        incoming_observed=true
+        local now=mcu.ticks()
+        if call_active and now-call_started>=0 and now-call_started<120000 then return end
+        call_active=true;call_started=now
+        local caller
+        for _,value in ipairs({...})do
+            if type(value)=="string" and #value>=5 and #value<=21 and value:match("^%+?%d+$")then caller=value;break end
+        end
+        if not caller and type(cc)=="table"then
+            local last=api(cc.lastNum)
+            if type(last)=="string" and #last>=5 and #last<=21 and last:match("^%+?%d+$")then caller=last end
+        end
+        enqueue("call_received",caller or "","",nil,api(os.time))
+    elseif state=="DISCONNECTED" or state=="HANGUP_CALL_DONE"then call_active=false end
 end)
-sys.subscribe("SMS_READY",function()sms_ready=true;emit({event="sms_ready"})end)
+sys.subscribe("SMS_READY",function()sms_ready=true;sms_ready_iccid=api(mobile.iccid);emit({event="sms_ready"})end)
 sys.subscribe("SMS_SENT",function(success,rp_cause,cause_text,reference,error_code)
     if not pending then return end
     local r={event="sms_result",id=pending.id,submitted=success==true,
@@ -188,5 +216,5 @@ sys.timerLoopStart(function()
         save_send(pending.id,r);emit(r)
     end
 end,1000)
-log.info(PROJECT,VERSION,"protocol 2 ready; no automatic SMS")
+log.info(PROJECT,VERSION,"protocol 3 ready; no automatic SMS or answering")
 sys.run()

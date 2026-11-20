@@ -217,6 +217,7 @@ func newHarness(t *testing.T, d *disk) *harness {
 	if err = L.DoString(string(source)); err != nil {
 		t.Fatal(err)
 	}
+	h.call("_SMS_READY")
 	return h
 }
 func (h *harness) call(name string, args ...lua.LValue) {
@@ -246,7 +247,7 @@ func TestBootNoAutomaticSendAndStatus(t *testing.T) {
 		t.Fatal("automatic SMS")
 	}
 	s := h.request(map[string]any{"cmd": "status"})
-	if s["protocol"] != float64(2) || s["durable"] != true || s["device_id"] != "device-1" {
+	if s["protocol"] != float64(3) || s["durable"] != true || s["device_id"] != "device-1" {
 		t.Fatal(s)
 	}
 }
@@ -268,7 +269,7 @@ func TestJournalSurvivesRestartAndAck(t *testing.T) {
 }
 func TestSendJournalPreventsDuplicateAfterReboot(t *testing.T) {
 	h := newHarness(t, nil)
-	q := map[string]any{"cmd": "sms_send", "id": "unique", "to": "+12025550100", "text": "test"}
+	q := map[string]any{"cmd": "sms_send", "expected_iccid": "sim-1", "id": "unique", "to": "+12025550100", "text": "test"}
 	h.request(q)
 	if h.sends != 1 {
 		t.Fatal(h.sends)
@@ -299,7 +300,7 @@ func TestMalformedStreamingAndPersistenceFailure(t *testing.T) {
 		t.Fatal("invalid JSON accepted")
 	}
 	h.disk.fail = true
-	r := h.request(map[string]any{"cmd": "sms_send", "id": "new", "to": "50000", "text": "101"})
+	r := h.request(map[string]any{"cmd": "sms_send", "expected_iccid": "sim-1", "id": "new", "to": "50000", "text": "101"})
 	if h.sends != 0 || r["event"] != "error" {
 		t.Fatal("send despite journal failure")
 	}
@@ -321,11 +322,65 @@ func TestLateAckAndBoundedInbox(t *testing.T) {
 }
 func TestSendTimeoutDoesNotFreeSlotOrResend(t *testing.T) {
 	h := newHarness(t, nil)
-	h.request(map[string]any{"cmd": "sms_send", "id": "a", "to": "50000", "text": "101"})
+	h.request(map[string]any{"cmd": "sms_send", "expected_iccid": "sim-1", "id": "a", "to": "50000", "text": "101"})
 	h.ticks = 100000
 	h.call("_timer")
-	h.request(map[string]any{"cmd": "sms_send", "id": "b", "to": "50000", "text": "101"})
+	h.request(map[string]any{"cmd": "sms_send", "expected_iccid": "sim-1", "id": "b", "to": "50000", "text": "101"})
 	if h.sends != 1 {
 		t.Fatal("new send after unknown outcome")
+	}
+}
+
+func TestSendRejectsMissingAndChangedSIM(t *testing.T) {
+	h := newHarness(t, nil)
+	for _, sim := range []any{nil, "", "another-sim"} {
+		r := h.request(map[string]any{"cmd": "sms_send", "id": "guard", "to": "50000", "text": "test", "expected_iccid": sim})
+		if r["event"] != "error" || h.sends != 0 {
+			t.Fatal("sent with mismatched SIM", r)
+		}
+	}
+	h.request(map[string]any{"cmd": "sms_send", "id": "guard", "to": "50000", "text": "test", "expected_iccid": "sim-1"})
+	if h.sends != 1 {
+		t.Fatal("valid SIM rejected")
+	}
+}
+
+func TestPassiveIncomingCallsPersistAndNeverSendOrAnswer(t *testing.T) {
+	h := newHarness(t, nil)
+	h.call("_CC_IND", lua.LString("INCOMINGCALL"), lua.LString("+12025550100"))
+	h.call("_CC_IND", lua.LString("INCOMINGCALL"), lua.LString("+12025550100"))
+	in := h.request(map[string]any{"cmd": "inbox"})
+	items := in["messages"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["event"] != "call_received" || h.sends != 0 {
+		t.Fatal(in)
+	}
+	h.call("_CC_IND", lua.LString("DISCONNECTED"))
+	h.call("_CC_IND", lua.LString("INCOMINGCALL"))
+	h2 := newHarness(t, h.disk)
+	if got := h2.request(map[string]any{"cmd": "inbox"})["messages"].([]any); len(got) != 2 {
+		t.Fatal("call journal lost", got)
+	}
+	if h.sends != 0 || h2.sends != 0 {
+		t.Fatal("passive callback sent an SMS")
+	}
+}
+
+func TestSMSReadinessDoesNotCarryToReplacementSIM(t *testing.T) {
+	h := newHarness(t, nil)
+	if err := h.L.DoString(`mobile.iccid=function() return "new-sim" end`); err != nil {
+		t.Fatal(err)
+	}
+	s := h.request(map[string]any{"cmd": "status"})
+	if s["sms_ready_event_seen"] == true {
+		t.Fatal("old readiness carried to new SIM")
+	}
+	r := h.request(map[string]any{"cmd": "sms_send", "id": "new-card", "to": "50000", "text": "test", "expected_iccid": "new-sim"})
+	if r["event"] != "error" || h.sends != 0 {
+		t.Fatal("sent before replacement SIM ready")
+	}
+	h.call("_SMS_READY")
+	h.request(map[string]any{"cmd": "sms_send", "id": "new-card", "to": "50000", "text": "test", "expected_iccid": "new-sim"})
+	if h.sends != 1 {
+		t.Fatal("replacement readiness ignored")
 	}
 }

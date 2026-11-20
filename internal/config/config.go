@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kxn/mobilemod/internal/domain"
+	"github.com/kxn/mobilemod/internal/phone"
 )
 
 type Forwarding struct {
@@ -139,23 +140,14 @@ func (c Config) Validate() error {
 	return nil
 }
 func ValidNumber(s string) bool {
-	s = strings.TrimPrefix(s, "+")
-	if len(s) < 5 || len(s) > 20 {
-		return false
-	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
+	return phone.Normalize(s) != ""
 }
 func Receiver(actual, manual, id string) string {
-	if ValidNumber(actual) && strings.Trim(actual, "+0") != "" {
-		return actual
+	if n := phone.Normalize(actual); n != "" {
+		return n
 	}
-	if manual != "" {
-		return manual
+	if n := phone.Normalize(manual); n != "" {
+		return n
 	}
 	return id
 }
