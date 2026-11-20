@@ -7,14 +7,8 @@
     "allowed_chats": [],
     "recipients": [{"type": "open_id", "id": "ou_REPLACE_ME"}]
   },
-  "modules": [
-    {
-      "id": "sim-1",
-      "port": "COM3",
-      "number": "",
-      "forwarding": {"backend": "unsupported"}
-    }
-  ],
+  "auto_discover": true,
+  "modules": [],
   "assembly_timeout_seconds": 300,
   "max_parts": 32,
   "send_limit_per_hour": 20,

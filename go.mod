@@ -10,9 +10,7 @@ require (
 	github.com/yuin/gopher-lua v1.1.1
 	go.bug.st/serial v1.8.0
 	go.etcd.io/bbolt v1.5.0
+	golang.org/x/sys v0.45.0
 )
 
-require (
-	github.com/gogo/protobuf v1.3.2 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-)
+require github.com/gogo/protobuf v1.3.2 // indirect

@@ -45,10 +45,11 @@ type Config struct {
 	AllowedDestinations    []string `json:"allowed_destinations,omitempty"`
 	RetentionDays          int      `json:"retention_days"`
 	HealthListen           string   `json:"health_listen,omitempty"`
+	AutoDiscover           bool     `json:"auto_discover"`
 }
 
 func Load(path string) (Config, error) {
-	var c Config
+	c := Config{AutoDiscover: true}
 	f, err := os.Open(path)
 	if err != nil {
 		return c, err
@@ -103,16 +104,16 @@ func (c Config) Validate() error {
 			return errors.New("invalid notification recipient")
 		}
 	}
-	if len(c.Modules) == 0 {
-		return errors.New("at least one module is required")
+	if len(c.Modules) == 0 && !c.AutoDiscover {
+		return errors.New("configure modules or enable auto_discover")
 	}
 	ids, ports := map[string]bool{}, map[string]bool{}
 	for _, m := range c.Modules {
-		if m.ID == "" || strings.ContainsAny(m.ID, " /\\\r\n\t") || m.Port == "" {
-			return errors.New("module id and explicit serial port are required")
+		if m.ID == "" || strings.ContainsAny(m.ID, " /\\\r\n\t") || (!c.AutoDiscover && m.Port == "") {
+			return errors.New("module id is required; manual mode also requires a serial port")
 		}
 		p := strings.ToLower(m.Port)
-		if ids[m.ID] || ports[p] {
+		if ids[m.ID] || (p != "" && ports[p]) {
 			return errors.New("duplicate module id or serial port")
 		}
 		ids[m.ID] = true

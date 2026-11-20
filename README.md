@@ -17,6 +17,7 @@ Go 服务通过 USB 串口连接一个或多个 Air780EPM，把短信转发到�
 | Web 管理 | 支持本机或局域网访问、管理口令登录与修改、号码配置、飞书凭据验证和重连；无需前端构建或外部 CDN |
 | 来电提醒 | 被动监听 CC_IND，收到事件后持久化并转发；EPM 官方不支持 cc，不能保证该固件/运营商上报来电或号码，不会自动接听 |
 | 多模块 | 独立连接、状态、发送锁与发送限额；持久化绑定物理设备，串口交换不会静默发错设备 |
+| USB 热插拔 | 默认自动枚举应用串口并按设备 ID 纳管；启动无模块、拔出、重新插入或端口号改变无需重启 |
 | 呼叫转移 | 有查询、设置、取消命令及运营商短信适配器；**当前 EPM/106 无可用的呼转控制 API，默认明确拒绝**，不能承诺用拨号代码实现 |
 | 彩信 | **当前官方 SMS API 不支持彩信**。没有 WAP Push 原始载荷或彩信 APN 下载接口；未来驱动如提供通知会保留并转发，但本固件无法保证收到通知或下载附件 |
 
@@ -28,19 +29,19 @@ Go 服务通过 USB 串口连接一个或多个 Air780EPM，把短信转发到�
 go build -trimpath -o mobilemod.exe ./cmd/mobilemod
 Copy-Item config.example.json config.local.json
 $env:MOBILEMOD_FEISHU_APP_SECRET = '填入自己的密钥'
-# 编辑 config.local.json 的 app_id、allowed_users、recipients 和串口
+# 编辑 config.local.json 的 app_id、allowed_users 和 recipients；默认自动发现模块
 .\mobilemod.exe check -config config.local.json
 .\mobilemod.exe devices
 .\mobilemod.exe run -config config.local.json
 ```
 
-Linux/macOS 使用 `./mobilemod`。数据库路径相对于配置文件目录解析；Linux 端口应使用 `/dev/serial/by-id/...` 等稳定路径。Windows 使用 USB `MI_06` 的用户串口，COM 号以本机枚举结果为准；其他日志口不是短信控制端口。`devices` 仅枚举，不会试探或发送短信。
+Linux/macOS 使用 `./mobilemod`。数据库路径相对于配置文件目录解析。默认 `auto_discover: true`，`modules: []`，无需填写 COM 或 tty 号。程序识别 USB 应用接口，再通过桥接 status 握手读取设备 ID；新模块自动新增、拔出标记离线、换端口后按原身份恢复。`devices` 仅枚举，不会发送短信。详见 [USB 自动发现](docs/usb-discovery.md)。
 
-复制 `modules` 项即可添加模块，`id` 和串口必须各不相同。启动后打开 **http://127.0.0.1:8765/**，可查看状态及设置号码。SIM 能读出号码时自动使用；读不出时，在该模块卡片填写备用号码，可省略国内手机号的 +86，保存立即生效。备用号码按 SIM 身份保存在数据库，不按 USB 端口保存；换卡不会沿用。配置文件的旧 `number` 字段仅在该模块首次识别 SIM 时导入，之后使用 Web 管理。
+插入新模块即可自动添加。启动后打开 **http://127.0.0.1:8765/**，可查看状态及设置号码。SIM 能读出号码时自动使用；读不出时，在该模块卡片填写备用号码，可省略国内手机号的 +86，保存立即生效。备用号码按 SIM 身份保存在数据库，不按 USB 端口保存；换卡不会沿用。配置文件的旧 `number` 字段仅在该模块首次识别 SIM 时导入，之后使用 Web 管理。
 
 首次访问须从数据库同目录的 `admin-setup-code` 文件读取一次性初始化码，在页面设置管理口令；之后登录即可查看状态、修改口令及飞书 App ID/App Secret。飞书凭据先验证再保存，成功后自动重连，页面不回显密钥。Linux 局域网部署可将 `health_listen` 设为 `0.0.0.0:8765`，再通过服务器 IP 访问，仍须口令登录。HTTP 仅适合可信局域网；加密远程访问可使用 SSH 隧道。详见 [管理页与认证](docs/web-admin.md)。
 
-可选 `expected_device_id` 填 IMEI 作额外绑定检查。一个数据库只能运行一个实例；换物理设备或改模块 ID 应停机备份数据库并进行受控迁移，不要直接把旧串口指向别的模块。换卡请先断开模块 USB 电源，换好后重新插入，避免依赖未经验证的热插拔行为。
+可选在 `modules` 中填写 `id` 和 `expected_device_id` 为指定设备命名。既有模块名会沿用数据库绑定；自动模式不依赖配置中的端口号。若要手工指定串口，设置 `auto_discover: false` 并填写各模块 port。一个数据库只能运行一个实例。换 SIM 卡请先断开模块 USB 电源，换好后重新插入；USB 热插拔与带电换 SIM 不同。
 
 示例配置从环境变量读取密钥；也支持私有配置的 `app_secret`。配置和数据库含短信、号码与凭据，必须限制为服务用户可读写，不应提交到 Git。Windows 启停脚本会为运行目录设置当前用户私有 ACL。Linux 部署示例见 [部署说明](docs/deployment.md)。
 

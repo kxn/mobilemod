@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/kxn/mobilemod/internal/bot"
@@ -24,9 +25,10 @@ type Device interface {
 	Send(context.Context, string, string, string, domain.Identity) (domain.Envelope, error)
 }
 type Engine struct {
-	Config  config.Config
-	Store   *store.Store
-	Modules map[string]Device
+	Config    config.Config
+	Store     *store.Store
+	Modules   map[string]Device
+	modulesMu sync.RWMutex
 }
 
 func contains(values []string, s string) bool {
@@ -141,7 +143,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 		result = bot.Help
 	case "modules", "status":
 		var ids []string
-		for id, d := range e.Modules {
+		for id, d := range e.devices() {
 			if c.Module == "" || c.Module == id || phone.Equal(c.Module, d.Snapshot().Receiver) {
 				ids = append(ids, id)
 			}
@@ -151,7 +153,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 			result = "模块ID不存在"
 		}
 		for _, id := range ids {
-			s := e.Modules[id].Snapshot()
+			s := e.devices()[id].Snapshot()
 			result += fmt.Sprintf("模块：%s\n接收号码：%s\n在线：%t；网络：%d；CSQ：%d；短信就绪：%t\n固件：%s；协议：%d\n彩信下载：不支持\n\n", id, s.Receiver, s.Online, s.Network, s.CSQ, s.Ready, s.Core, s.Protocol)
 			if s.IncomingCalls {
 				result += "来电通知：已观察到来电事件\n"
@@ -278,7 +280,7 @@ func (e *Engine) submitExpected(ctx context.Context, device Device, commandID, m
 
 // LocalSend uses the same durable send ledger/rate limits as Feishu commands.
 func (e *Engine) LocalSend(ctx context.Context, module, to, text string, id string) (string, error) {
-	d, ok := e.Modules[module]
+	d, ok := e.devices()[module]
 	if !ok {
 		return "", errors.New("unknown module")
 	}
@@ -355,4 +357,14 @@ func (e *Engine) Cleanup(now time.Time) error {
 		}
 		return nil
 	})
+}
+
+func (e *Engine) devices() map[string]Device {
+	e.modulesMu.RLock()
+	defer e.modulesMu.RUnlock()
+	result := make(map[string]Device, len(e.Modules))
+	for id, m := range e.Modules {
+		result[id] = m
+	}
+	return result
 }

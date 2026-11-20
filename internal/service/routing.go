@@ -18,7 +18,7 @@ func (e *Engine) source(number string) (Device, modem.Snapshot, error) {
 	}
 	var found Device
 	var state modem.Snapshot
-	for _, d := range e.Modules {
+	for _, d := range e.devices() {
 		s := d.Snapshot()
 		if !s.Online || s.NumberSource == "module_id" || s.NumberSource == "unavailable" || !phone.Equal(s.Receiver, n) {
 			continue
@@ -64,7 +64,7 @@ func (e *Engine) handleSMSReply(ctx context.Context, job domain.CommandJob) erro
 		if target.SIM == "" || target.SIM == "unknown" {
 			return e.reply(job, "原短信的接收号码和SIM未知，请使用 /sms 明确指定发送号码。")
 		}
-		for _, device := range e.Modules {
+		for _, device := range e.devices() {
 			state := device.Snapshot()
 			if !state.Online || state.Identity.SIM != target.SIM {
 				continue

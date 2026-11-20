@@ -38,6 +38,8 @@ type Runtime struct {
 	feishu       *managedFeishu
 	adminAuth    *admin.Auth
 	credentialMu sync.Mutex
+	modulesMu    sync.RWMutex
+	Discovery    *modem.Discovery
 }
 
 func New(c config.Config, log *slog.Logger) (*Runtime, error) {
@@ -69,37 +71,27 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 	}
 	r.assembler = &sms.Assembler{Store: db, Recipients: c.Feishu.Recipients, Timeout: time.Duration(c.AssemblyTimeoutSeconds) * time.Second, MaxParts: c.MaxParts}
 	for _, cfg := range c.Modules {
-		m := modem.New(cfg, db, log)
-		m.Notice = func(code string, count int) error {
-			return db.Update(func(tx *store.Tx) error {
-				key := domain.Key("module_notice", cfg.ID, code, fmt.Sprint(count))
-				if tx.Has("settings", key) {
-					return nil
-				}
-				text := fmt.Sprintf("【模块状态告警】\n模块：%s\n类型：%s\n计数/消息编号：%d\n模块报告队列满或持久化失败，请检查设备连接和存储。已在电脑落盘的短信保持保留。", cfg.ID, code, count)
-				for _, to := range c.Feishu.Recipients {
-					if err := notify.EnqueueText(tx, key, to, text, time.Now()); err != nil {
-						return err
-					}
-				}
-				return tx.Put("settings", key, true)
-			})
-		}
-		m.Handle = func(ctx context.Context, id domain.Identity, e domain.Envelope) error {
-			return r.assembler.Ingest(id, e, time.Now())
-		}
-		r.Modules = append(r.Modules, m)
-		r.Engine.Modules[cfg.ID] = m
+		r.addModule(cfg)
 	}
 	r.Listener = r.feishu
 	return r, nil
 }
 func (r *Runtime) startModules(ctx context.Context, wg *sync.WaitGroup) {
-	for _, m := range r.Modules {
+	if r.Config.AutoDiscover {
+		discovery := r.Discovery
+		if discovery == nil {
+			discovery = &modem.Discovery{Log: r.Log, Find: r.findModule}
+		}
+		wg.Add(1)
+		go func() { defer wg.Done(); discovery.Run(ctx) }()
+		return
+	}
+	for _, m := range r.modules() {
 		wg.Add(1)
 		go func() { defer wg.Done(); m.Run(ctx) }()
 	}
 }
+
 func (r *Runtime) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -127,7 +119,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 		})
 		mux.HandleFunc("/readyz", func(w http.ResponseWriter, req *http.Request) {
 			online := 0
-			for _, m := range r.Modules {
+			for _, m := range r.modules() {
 				if m.Snapshot().Online && m.Snapshot().Ready {
 					online++
 				}
@@ -137,7 +129,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			if !ready {
 				w.WriteHeader(503)
 			}
-			json.NewEncoder(w).Encode(map[string]any{"ready": ready, "feishu": r.Listener.IsReady(), "modules_online": online, "modules_configured": len(r.Modules)})
+			json.NewEncoder(w).Encode(map[string]any{"ready": ready, "feishu": r.Listener.IsReady(), "modules_online": online, "modules_configured": len(r.modules())})
 		})
 		server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second}
 		wg.Add(1)
@@ -162,7 +154,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			}
 		}
 	}()
-	for i := 0; i < min(len(r.Modules)+2, 16); i++ {
+	for i := 0; i < min(len(r.modules())+2, 16); i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -216,7 +208,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			}
 		}
 	}()
-	r.Log.Info("gateway started", "modules", len(r.Modules))
+	r.Log.Info("gateway started", "modules", len(r.modules()))
 	var result error
 	select {
 	case <-ctx.Done():
@@ -243,11 +235,11 @@ func (r *Runtime) LocalSend(ctx context.Context, module, to, text, id string) (s
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	for {
-		m, ok := r.Engine.Modules[module]
-		if !ok {
+		m, ok := r.Engine.devices()[module]
+		if !ok && !r.Config.AutoDiscover {
 			return "", errors.New("unknown module")
 		}
-		if s := m.Snapshot(); s.Online && s.Ready {
+		if ok && m.Snapshot().Online && m.Snapshot().Ready {
 			return r.Engine.LocalSend(ctx, module, to, text, id)
 		}
 		select {
@@ -258,4 +250,37 @@ func (r *Runtime) LocalSend(ctx context.Context, module, to, text, id string) (s
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+// addModule is called while constructing the runtime or holding modulesMu.
+func (r *Runtime) addModule(cfg config.Module) *modem.Module {
+	m := modem.New(cfg, r.Store, r.Log)
+	m.Notice = func(code string, count int) error {
+		return r.Store.Update(func(tx *store.Tx) error {
+			key := domain.Key("module_notice", cfg.ID, code, fmt.Sprint(count))
+			if tx.Has("settings", key) {
+				return nil
+			}
+			text := fmt.Sprintf("【模块状态告警】\n模块：%s\n类型：%s\n计数/消息编号：%d\n模块报告队列满或持久化失败，请检查设备连接和存储。已在电脑落盘的短信保持保留。", cfg.ID, code, count)
+			for _, to := range r.Config.Feishu.Recipients {
+				if err := notify.EnqueueText(tx, key, to, text, time.Now()); err != nil {
+					return err
+				}
+			}
+			return tx.Put("settings", key, true)
+		})
+	}
+	m.Handle = func(ctx context.Context, id domain.Identity, e domain.Envelope) error {
+		return r.assembler.Ingest(id, e, time.Now())
+	}
+	r.Modules = append(r.Modules, m)
+	r.Engine.modulesMu.Lock()
+	r.Engine.Modules[cfg.ID] = m
+	r.Engine.modulesMu.Unlock()
+	return m
+}
+func (r *Runtime) modules() []*modem.Module {
+	r.modulesMu.RLock()
+	defer r.modulesMu.RUnlock()
+	return append([]*modem.Module(nil), r.Modules...)
 }

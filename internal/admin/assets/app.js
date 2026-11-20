@@ -55,6 +55,7 @@ function render(status){
   if(!feishuDirty)document.querySelector('#feishu-app-id').value=status.feishu_app_id||'';
   document.querySelector('#feishu-secret-state').textContent=status.feishu_secret_set?'已配置密钥；页面不会回显。更换 App ID 时须填写新密钥。':'尚未配置密钥';
   const container=document.querySelector('#modules');if(!cards.size)container.replaceChildren();
+  if(!status.modules.length)container.append(el('p','loading','尚未发现模块。插入 USB 模块后会自动连接。'));
   const active=new Set(status.modules.map(m=>m.id));
   for(const [id,c] of cards){if(!active.has(id)){c.card.remove();cards.delete(id);}}
   const numberCounts=new Map();for(const m of status.modules){if(m.online&&m.number_source!=='module_id')numberCounts.set(m.receiver,(numberCounts.get(m.receiver)||0)+1);}

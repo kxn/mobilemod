@@ -105,7 +105,10 @@ func (m *Module) acceptStatus(e domain.Envelope) error {
 	}); err != nil {
 		return err
 	}
-	s := Snapshot{ID: m.Config.ID, Port: m.Config.Port, Online: true, DetectedNumber: e.Number, SIMKey: simHash(e.ICCID), Core: e.Core, Protocol: e.Protocol, Network: e.Network, CSQ: e.CSQ, Ready: e.SMSReady, LastSeen: time.Now(), GuardedSend: e.Protocol >= 3 && e.Capabilities["guarded_send"], IncomingCalls: e.Capabilities["incoming_calls"], PassiveCalls: e.Capabilities["passive_call_listener"]}
+	m.mu.RLock()
+	port := m.status.Port
+	m.mu.RUnlock()
+	s := Snapshot{ID: m.Config.ID, Port: port, Online: true, DetectedNumber: e.Number, SIMKey: simHash(e.ICCID), Core: e.Core, Protocol: e.Protocol, Network: e.Network, CSQ: e.CSQ, Ready: e.SMSReady, LastSeen: time.Now(), GuardedSend: e.Protocol >= 3 && e.Capabilities["guarded_send"], IncomingCalls: e.Capabilities["incoming_calls"], PassiveCalls: e.Capabilities["passive_call_listener"]}
 	s.Identity = domain.Identity{Module: m.Config.ID, Receiver: s.Receiver, SIM: simHash(e.ICCID)}
 	s = m.resolveNumber(s)
 	m.mu.Lock()
@@ -154,17 +157,7 @@ func (m *Module) received(ctx context.Context, c *Connection, e domain.Envelope)
 func (m *Module) connect(ctx context.Context) error {
 	open := m.Open
 	if open == nil {
-		open = func(name string) (io.ReadWriteCloser, error) {
-			p, e := serial.Open(name, &serial.Mode{BaudRate: 115200, DataBits: 8, Parity: serial.NoParity, StopBits: serial.OneStopBit})
-			if e != nil {
-				return nil, e
-			}
-			if e = p.SetReadTimeout(300 * time.Millisecond); e != nil {
-				p.Close()
-				return nil, e
-			}
-			return p, nil
-		}
+		open = openSerial
 	}
 	p, err := open(m.Config.Port)
 	if err != nil {
@@ -183,24 +176,32 @@ func (m *Module) connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return m.serve(ctx, c, e, m.Config.Port)
+}
+
+func (m *Module) serve(ctx context.Context, c *Connection, e domain.Envelope, port string) error {
+	var err error
+	m.mu.Lock()
+	m.status.Port = port
+	m.mu.Unlock()
 	if err = m.acceptStatus(e); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	m.conn = c
 	m.mu.Unlock()
-	defer func() { m.mu.Lock(); m.conn = nil; m.status.Online = false; m.mu.Unlock() }()
-	m.Log.Info("module connected", "module", m.Config.ID, "port", m.Config.Port, "core", e.Core)
+	defer func() { m.mu.Lock(); m.conn = nil; m.status.Online = false; m.status.Ready = false; m.mu.Unlock() }()
+	m.Log.Info("module connected", "module", m.Config.ID, "port", port, "core", e.Core)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		qctx, cancel = context.WithTimeout(ctx, 4*time.Second)
+		qctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 		e, err = c.Call(qctx, map[string]any{"cmd": "status"}, false)
 		cancel()
 		if err != nil {
 			return err
 		}
-		if err = m.acceptStatus(e); err != nil {
+		if err := m.acceptStatus(e); err != nil {
 			return err
 		}
 		qctx, cancel = context.WithTimeout(ctx, 4*time.Second)
@@ -226,6 +227,7 @@ func (m *Module) Run(ctx context.Context) {
 		err := m.connect(ctx)
 		m.mu.Lock()
 		m.status.Online = false
+		m.status.Ready = false
 		m.status.Error = "disconnected or identity/protocol mismatch"
 		m.mu.Unlock()
 		if ctx.Err() != nil {
@@ -277,4 +279,16 @@ func (m *Module) Send(ctx context.Context, id, to, text string, expected domain.
 		return out, ErrSIMChanged
 	}
 	return out, err
+}
+
+func openSerial(name string) (io.ReadWriteCloser, error) {
+	p, err := serial.Open(name, &serial.Mode{BaudRate: 115200, DataBits: 8, Parity: serial.NoParity, StopBits: serial.OneStopBit})
+	if err != nil {
+		return nil, err
+	}
+	if err = p.SetReadTimeout(300 * time.Millisecond); err != nil {
+		p.Close()
+		return nil, err
+	}
+	return p, nil
 }
