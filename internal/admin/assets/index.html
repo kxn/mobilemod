@@ -9,16 +9,45 @@
 </head>
 <body>
   <main>
-    <header><div><div class="eyebrow">MOBILEMOD</div><h1>短信网关</h1><p>查看连接状态，管理每张 SIM 的接收号码。</p></div><div class="refresh"><span id="updated">正在连接…</span><button id="refresh" type="button">刷新状态</button></div></header>
+    <header><div><div class="eyebrow">MOBILEMOD</div><h1>短信网关</h1><p>查看连接状态，管理 SIM 与飞书设置。</p></div><div class="refresh"><span id="updated">正在连接…</span><button id="refresh" type="button">刷新状态</button><button id="logout" type="button" hidden>退出登录</button></div></header>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <section id="authentication" class="settings auth-panel" hidden>
+      <h2 id="auth-title">登录管理界面</h2>
+      <p id="auth-description">输入管理口令以查看状态和修改设置。</p>
+      <form id="auth-form">
+        <div id="setup-code-row" hidden><label for="setup-code">一次性初始化码</label><input id="setup-code" autocomplete="off" maxlength="128"><p class="small">从服务器数据库同目录的 admin-setup-code 文件读取。</p></div>
+        <label for="login-password" id="login-label">管理口令</label><input id="login-password" type="password" autocomplete="current-password" maxlength="256" required>
+        <button id="login-submit" class="save" type="submit">登录</button>
+      </form>
+    </section>
+    <div id="gateway" hidden>
     <section class="overview" aria-label="网关概况">
       <div class="metric"><span>飞书长连接</span><strong id="feishu">—</strong></div>
       <div class="metric"><span>在线模块</span><strong id="online">—</strong></div>
       <div class="metric"><span>待转发消息</span><strong id="pending">—</strong></div>
     </section>
-    <div id="notice" role="status" aria-live="polite"></div>
     <section class="section-head"><div><h2>模块与 SIM</h2><p>自动读取优先；手工号码只属于当前 SIM，换卡后不会沿用。</p></div><span class="hint">国内手机号可不填 +86</span></section>
     <section id="modules" class="modules" aria-label="模块列表"><p class="loading">正在读取模块状态…</p></section>
-    <footer>仅在本机开放 · 不自动接听电话 · 短信提交成功不代表手机送达</footer>
+    <section class="section-head"><div><h2>网关设置</h2><p>配置保存到本机数据库，重启后继续生效。</p></div></section>
+    <section class="modules" aria-label="网关设置">
+      <article class="settings"><h3>飞书认证</h3><p>验证成功后重新建立长连接，不发送测试消息。更换应用后，须同步检查配置文件中的用户白名单和接收人。</p>
+        <form id="feishu-form">
+          <label for="feishu-app-id">App ID</label><input id="feishu-app-id" autocomplete="off" maxlength="128" required>
+          <label for="feishu-secret">App Secret</label><input id="feishu-secret" type="password" autocomplete="new-password" maxlength="256" placeholder="留空保留当前应用的密钥">
+          <p class="small" id="feishu-secret-state"></p><button class="save" type="submit">验证并保存</button><div class="message" id="feishu-message" role="status"></div>
+        </form>
+      </article>
+      <article class="settings"><h3>管理口令</h3><p>至少 12 字节。修改后其他浏览器的登录立即失效。</p>
+        <form id="password-form">
+          <label for="old-password">当前口令</label><input id="old-password" type="password" autocomplete="current-password" maxlength="256" required>
+          <label for="new-password">新口令</label><input id="new-password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required>
+          <label for="confirm-password">确认新口令</label><input id="confirm-password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required>
+          <button class="save" type="submit">修改口令</button><div class="message" id="password-message" role="status"></div>
+        </form>
+      </article>
+    </section>
+    </div>
+    <footer>管理登录有效期 12 小时 · 不自动接听电话 · 短信提交成功不代表手机送达</footer>
   </main>
 </body>
 </html>

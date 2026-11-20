@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -26,14 +27,17 @@ type EventListener interface {
 	IsReady() bool
 }
 type Runtime struct {
-	Config    config.Config
-	Store     *store.Store
-	Engine    *Engine
-	Modules   []*modem.Module
-	Listener  EventListener
-	Client    *feishu.Client
-	Log       *slog.Logger
-	assembler *sms.Assembler
+	Config       config.Config
+	Store        *store.Store
+	Engine       *Engine
+	Modules      []*modem.Module
+	Listener     EventListener
+	Client       *feishu.Client
+	Log          *slog.Logger
+	assembler    *sms.Assembler
+	feishu       *managedFeishu
+	adminAuth    *admin.Auth
+	credentialMu sync.Mutex
 }
 
 func New(c config.Config, log *slog.Logger) (*Runtime, error) {
@@ -41,9 +45,29 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Runtime{Config: c, Store: db, Log: log, Client: feishu.New(c.Feishu.AppID, c.Feishu.AppSecret)}
+	credentials, err := loadFeishuCredentials(db, feishuCredentials{AppID: c.Feishu.AppID, Secret: c.Feishu.AppSecret})
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	r := &Runtime{Config: c, Store: db, Log: log, Client: feishu.New(credentials.AppID, credentials.Secret)}
+	if c.HealthListen != "" {
+		setupPath := filepath.Join(filepath.Dir(c.Database), "admin-setup-code")
+		r.adminAuth, err = admin.NewAuth(db, setupPath)
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		if setup, _ := r.adminAuth.State(""); setup {
+			log.Info("Web admin setup required; read owner-only initialization file", "path", setupPath)
+		}
+	}
 	r.Engine = &Engine{Config: c, Store: db, Modules: map[string]Device{}}
-	r.Engine.ParentLookup = r.Client
+	r.feishu = &managedFeishu{client: r.Client, changed: make(chan struct{}, 1)}
+	r.feishu.factory = func(client *feishu.Client) EventListener {
+		return &feishu.Listener{AppID: client.AppID, Secret: client.Secret, Log: log, Handle: r.Engine.Accept}
+	}
+	r.Engine.ParentLookup = r.feishu
 	r.assembler = &sms.Assembler{Store: db, Recipients: c.Feishu.Recipients, Timeout: time.Duration(c.AssemblyTimeoutSeconds) * time.Second, MaxParts: c.MaxParts}
 	for _, cfg := range c.Modules {
 		m := modem.New(cfg, db, log)
@@ -68,7 +92,7 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 		r.Modules = append(r.Modules, m)
 		r.Engine.Modules[cfg.ID] = m
 	}
-	r.Listener = &feishu.Listener{AppID: c.Feishu.AppID, Secret: c.Feishu.AppSecret, Log: log, Handle: r.Engine.Accept}
+	r.Listener = r.feishu
 	return r, nil
 }
 func (r *Runtime) startModules(ctx context.Context, wg *sync.WaitGroup) {
@@ -92,7 +116,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return err
 		}
 		mux := http.NewServeMux()
-		mux.Handle("/", admin.New(r, listener.Addr().String()))
+		web := admin.New(r, listener.Addr().String())
+		web.Auth = r.adminAuth
+		mux.Handle("/", web)
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
 			if req.Method != http.MethodGet {
 				w.WriteHeader(http.StatusMethodNotAllowed)
@@ -115,7 +141,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"ready": ready, "feishu": r.Listener.IsReady(), "modules_online": online, "modules_configured": len(r.Modules)})
 		})
-		server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
+		server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -159,7 +185,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		worker := notify.Worker{Store: r.Store, Sender: r.Client, Log: r.Log}
+		worker := notify.Worker{Store: r.Store, Sender: r.feishu, Log: r.Log}
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
 		for {

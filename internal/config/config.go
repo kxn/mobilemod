@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,7 +89,9 @@ func Load(path string) (Config, error) {
 }
 func (c Config) Validate() error {
 	if c.Feishu.AppID == "" || c.Feishu.AppSecret == "" {
-		return errors.New("Feishu app_id and secret are required")
+		if c.HealthListen == "" || c.Feishu.AppID != "" || c.Feishu.AppSecret != "" {
+			return errors.New("Feishu app_id and secret must be set together, or both omitted when Web management is enabled")
+		}
 	}
 	if len(c.Feishu.AllowedUsers) == 0 {
 		return errors.New("allowed_users must not be empty (fail closed)")
@@ -134,8 +137,14 @@ func (c Config) Validate() error {
 			return errors.New("invalid allowed destination")
 		}
 	}
-	if c.HealthListen != "" && !strings.HasPrefix(c.HealthListen, "127.0.0.1:") {
-		return errors.New("health listener must bind 127.0.0.1")
+	if c.HealthListen != "" {
+		host, port, err := net.SplitHostPort(c.HealthListen)
+		if err != nil || net.ParseIP(host) == nil || port == "" {
+			return errors.New("health_listen requires a literal IP and port, for example 0.0.0.0:8765")
+		}
+		if _, err := net.LookupPort("tcp", port); err != nil {
+			return errors.New("invalid health listener port")
+		}
 	}
 	return nil
 }

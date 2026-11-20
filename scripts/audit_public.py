@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 PRIVATE_ROOTS = {".local", "private", "data", "diagnostics", "firmware-prep", "dist", "packages", ".playwright-mcp"}
-PRIVATE_NAMES = {"config.json", "config.local.json", "config.private.json", "credentials.json"}
+PRIVATE_NAMES = {"config.json", "config.local.json", "config.private.json", "credentials.json", "admin-setup-code"}
 PRIVATE_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".log", ".exe", ".soc", ".pem", ".key", ".zip"}
 PATTERNS = {
     "personal mobile number": re.compile(rb"(?<![0-9A-Za-z])(?:\+?86)?1[3-9][0-9]{9}(?![0-9A-Za-z])"),

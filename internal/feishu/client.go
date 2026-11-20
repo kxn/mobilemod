@@ -36,6 +36,12 @@ type Client struct {
 func New(id, secret string) *Client {
 	return &Client{AppID: id, Secret: secret, BaseURL: "https://open.feishu.cn", HTTP: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
 }
+
+// ValidateCredentials authenticates without sending a chat message.
+func (c *Client) ValidateCredentials(ctx context.Context) error {
+	_, err := c.accessToken(ctx)
+	return err
+}
 func (c *Client) request(ctx context.Context, path, token string, body any, out any) error {
 	return c.requestMethod(ctx, http.MethodPost, path, token, body, out)
 }

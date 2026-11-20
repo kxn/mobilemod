@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -122,8 +123,18 @@ func TestRuntimeSerialAssemblyToFeishuAndShutdown(t *testing.T) {
 	}
 	healthClient := &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
 	defer healthClient.CloseIdleConnections()
+	code, e := os.ReadFile(filepath.Join(filepath.Dir(cfg.Database), "admin-setup-code"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	session, e := r.adminAuth.Setup(string(code), "fictional-admin-password")
+	if e != nil {
+		t.Fatal(e)
+	}
 	for _, endpoint := range []string{"/healthz", "/readyz", "/api/status", "/"} {
-		res, e := healthClient.Get("http://" + cfg.HealthListen + endpoint)
+		req, _ := http.NewRequest(http.MethodGet, "http://"+cfg.HealthListen+endpoint, nil)
+		req.AddCookie(&http.Cookie{Name: "mobilemod_session", Value: session})
+		res, e := healthClient.Do(req)
 		if e != nil {
 			t.Fatal(e)
 		}

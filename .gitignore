@@ -17,6 +17,7 @@ firmware-prep/
 config.json
 config.local.json
 config.private.json
+admin-setup-code
 private/
 *.pem
 *.key

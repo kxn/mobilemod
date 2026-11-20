@@ -4,7 +4,7 @@ from audit_public import inspect
 
 class PublicAuditTest(unittest.TestCase):
     def test_private_paths_rejected(self):
-        for path in [".local/config.json", "data/state.db", "private/key", "config.json", ".env.production", "notes.log"]:
+        for path in [".local/config.json", "data/state.db", "private/key", "config.json", ".env.production", "notes.log", "admin-setup-code"]:
             with self.subTest(path=path):
                 self.assertTrue(inspect(path, b""))
 

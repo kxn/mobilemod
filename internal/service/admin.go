@@ -13,6 +13,8 @@ import (
 
 func (r *Runtime) AdminStatus() (admin.Status, error) {
 	status := admin.Status{Feishu: r.Listener.IsReady(), Modules: []modem.Snapshot{}}
+	client := r.feishu.current()
+	status.FeishuAppID, status.FeishuSecretSet = client.AppID, client.Secret != ""
 	for _, m := range r.Modules {
 		status.Modules = append(status.Modules, m.Snapshot())
 	}

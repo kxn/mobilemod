@@ -12,7 +12,7 @@ func valid() Config {
 	return Config{Database: "test.db", Feishu: Feishu{AppID: "app", AppSecret: "secret", AllowedUsers: []string{"owner"}, Recipients: []domain.Recipient{{Type: "open_id", ID: "owner"}}}, Modules: []Module{{ID: "a", Port: "COM1"}}, AssemblyTimeoutSeconds: 300, MaxParts: 32, SendLimitPerHour: 20, RetentionDays: 30}
 }
 func TestValidateFailClosed(t *testing.T) {
-	tests := []func(*Config){func(c *Config) { c.Feishu.AllowedUsers = nil }, func(c *Config) { c.Modules = append(c.Modules, c.Modules[0]) }, func(c *Config) { c.Modules = append(c.Modules, Module{ID: "b", Port: "com1"}) }, func(c *Config) { c.Feishu.Recipients = nil }, func(c *Config) { c.HealthListen = "0.0.0.0:80" }, func(c *Config) { c.MaxParts = 999 }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "shell"} }, func(c *Config) { c.Modules[0].Number = "+86;whoami" }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "sms"} }}
+	tests := []func(*Config){func(c *Config) { c.Feishu.AllowedUsers = nil }, func(c *Config) { c.Modules = append(c.Modules, c.Modules[0]) }, func(c *Config) { c.Modules = append(c.Modules, Module{ID: "b", Port: "com1"}) }, func(c *Config) { c.Feishu.Recipients = nil }, func(c *Config) { c.HealthListen = "untrusted.example:80" }, func(c *Config) { c.MaxParts = 999 }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "shell"} }, func(c *Config) { c.Modules[0].Number = "+86;whoami" }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "sms"} }}
 	for i, change := range tests {
 		c := valid()
 		change(&c)
@@ -23,6 +23,39 @@ func TestValidateFailClosed(t *testing.T) {
 	c := valid()
 	if e := c.Validate(); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestLANListenAddresses(t *testing.T) {
+	for _, address := range []string{"0.0.0.0:8765", "192.0.2.10:8765", "[::]:8765", "[::1]:8765"} {
+		c := valid()
+		c.HealthListen = address
+		if err := c.Validate(); err != nil {
+			t.Fatal(address, err)
+		}
+	}
+	for _, address := range []string{":8765", "127.0.0.1:", "127.0.0.1:70000", "127.0.0.1:invalid", "bad"} {
+		c := valid()
+		c.HealthListen = address
+		if err := c.Validate(); err == nil {
+			t.Fatal("invalid listener accepted", address)
+		}
+	}
+}
+
+func TestWebOnlyCredentialBootstrap(t *testing.T) {
+	c := valid()
+	c.Feishu.AppID, c.Feishu.AppSecret = "", ""
+	if c.Validate() == nil {
+		t.Fatal("missing credentials accepted without management UI")
+	}
+	c.HealthListen = "0.0.0.0:8765"
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	c.Feishu.AppID = "app"
+	if c.Validate() == nil {
+		t.Fatal("partial credentials accepted")
 	}
 }
 func TestReceiverPriority(t *testing.T) {
