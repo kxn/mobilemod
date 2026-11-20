@@ -49,7 +49,7 @@ jobs:
       - name: Formatting
         shell: bash
         run: test -z "$(gofmt -l cmd internal tools)"
-      - run: go test ./... -count=1 -coverprofile=coverage.out
+      - run: go test ./... -count=1 -coverprofile coverage.out
       - run: go vet ./...
       - if: runner.os == 'Linux'
         run: go test -race ./... -count=1

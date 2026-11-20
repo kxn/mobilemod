@@ -76,7 +76,7 @@ mobilemod send -config config.local.json -module sim-1 -to <目标号码> -text 
 ## 开发与验证
 
 ```text
-go test ./... -count=1 -coverprofile=coverage.out
+go test ./... -count=1 -coverprofile coverage.out
 go test -race ./... -count=1
 go vet ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
