@@ -1,0 +1,28 @@
+[Unit]
+Description=Multi-module SMS Feishu gateway
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=mobilemod
+Group=mobilemod
+SupplementaryGroups=dialout
+WorkingDirectory=/var/lib/mobilemod
+EnvironmentFile=/etc/mobilemod/environment
+ExecStart=/opt/mobilemod/mobilemod run -config /etc/mobilemod/config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/mobilemod
+
+[Install]
+WantedBy=multi-user.target

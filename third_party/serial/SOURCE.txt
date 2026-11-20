@@ -1,0 +1,1 @@
+go.bug.st/serial@v1.8.0

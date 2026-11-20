@@ -1,0 +1,24 @@
+{
+  "database": "data/mobilemod.db",
+  "feishu": {
+    "app_id": "cli_REPLACE_ME",
+    "secret_env": "MOBILEMOD_FEISHU_APP_SECRET",
+    "allowed_users": ["ou_REPLACE_ME"],
+    "allowed_chats": [],
+    "recipients": [{"type": "open_id", "id": "ou_REPLACE_ME"}]
+  },
+  "modules": [
+    {
+      "id": "sim-1",
+      "port": "COM3",
+      "number": "",
+      "forwarding": {"backend": "unsupported"}
+    }
+  ],
+  "assembly_timeout_seconds": 300,
+  "max_parts": 32,
+  "send_limit_per_hour": 20,
+  "allowed_destinations": [],
+  "retention_days": 30,
+  "health_listen": "127.0.0.1:8765"
+}

@@ -1,0 +1,26 @@
+title = "mobilemod public-source checks"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "personal-mobile-cn"
+description = "Personal mobile number, including test SIM numbers"
+regex = '''(?:^|[^0-9A-Za-z])((?:\+?86)?1[3-9][0-9]{9})(?:[^0-9A-Za-z]|$)'''
+secretGroup = 1
+
+[[rules]]
+id = "feishu-application-id"
+description = "Real-looking Feishu application identifier"
+regex = '''\bcli_[0-9a-f]{16}\b'''
+
+[[rules]]
+id = "feishu-private-identifier"
+description = "Feishu user/chat identifiers"
+regex = '''\b(?:ou|oc|on)_[0-9a-f]{32}\b'''
+
+[[rules]]
+id = "sim-iccid"
+description = "Real-looking SIM identity"
+regex = '''(?:^|[^0-9A-Za-z])(89[0-9]{17,20})(?:[^0-9A-Za-z]|$)'''
+secretGroup = 1

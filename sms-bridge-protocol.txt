@@ -1,0 +1,54 @@
+USB SMS bridge 0.2.0 / protocol 2
+
+Target: LuatOS-SoC_V2044_Air780EPM_106.soc, Lua 5.3 64-bit.
+USB MI_06 application UART, 115200 8N1. UTF-8 JSON objects, newline terminated.
+No automatic outgoing SMS, RNDIS networking, cloud hooks, dialing or carrier queries.
+The USB caller is a trusted local administrator. Never expose this interface directly
+to an unauthenticated network service.
+
+Requests always have a correlation id. Commands:
+{"cmd":"ping","id":"probe-1"}
+{"cmd":"status","id":"probe-2"}
+{"cmd":"inbox","id":"probe-3"}
+{"cmd":"sms_send","id":"unique-request-id","to":"DESTINATION_NUMBER","text":"test"}
+{"cmd":"ack","id":"ack-1","boot_id":"5","message_id":42}
+
+status includes protocol=2, device_id (IMEI), core, version, boot_id, number (optional),
+iccid (optional), SMS readiness, network, csq, inbox_count, durable, drops,
+capabilities. Host requires protocol >=2 and persists physical-device binding.
+inbox returns at most four retained events per request; empty messages is omitted.
+
+Incoming event:
+{"event":"sms_received","message_id":42,"boot_id":"5","device_id":"DEVICE",
+ "from":"10010","text":"body","number":"RECEIVING_NUMBER","iccid":"SIM_ID",
+ "metadata":{"refNum":7,"seqNum":2,"maxNum":3},"durable":true}
+Native autoLong merging is disabled. Single-part metadata may contain zeros.
+
+The module stores at most 64 unacknowledged fragments. Payloads use an append/close
+filesystem JSONL journal; ACKs are journaled before removing RAM entries. Compaction
+writes a temporary file then renames it. FSKV holds boot/sequence counters and small
+send intents. Restart replays the journal, retaining original IDs. Append failure
+sets durable=false on the event. Full queue preserves existing events, drops the new
+one and emits overflow with persistent drops count. Flash power failure and finite
+storage remain limits; this is not a carrier SMS archive.
+
+Host commits raw event, assembly and any completed message/outbox in one transaction
+before ACK with BOTH original boot_id and message_id. Replays are deduplicated.
+Wrong-boot ACK cannot remove an event.
+
+sms_send IDs: ASCII alphanumeric, underscore or dash, 1..40 characters. Destination
+is optional leading '+' plus 5..20 digits. Text 1..480 UTF-8 bytes on the bridge;
+host additionally enforces a single GSM-7/UCS-2 SMS and excludes non-BMP text.
+Explicit '+' enables international-number formatting; service/national numbers
+retain their digits. No generic AT or Lua execution is supported.
+
+sms_accepted only means local API acceptance. Final sms_result submitted=true means
+submission to SMSC, never recipient delivery. The module persists unknown send intent
+BEFORE the SMS API. Last 32 request results survive restart; host retains a longer
+ledger. One pending send is allowed. At 90 seconds result becomes unknown; the slot
+stays blocked until the callback or reboot. Never automatically retransmit after a
+timeout/disconnect. SMS_READY/SMS_SENT are core callbacks. Events interleave replies.
+
+Call forwarding and MMS capabilities are false. A future driver may supply
+mms_received/content_location for a rendered notice; current firmware cannot expose
+or download MMS binary payloads.
