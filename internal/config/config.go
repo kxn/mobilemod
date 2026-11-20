@@ -140,7 +140,7 @@ func (c Config) Validate() error {
 	return nil
 }
 func ValidNumber(s string) bool {
-	return phone.Normalize(s) != ""
+	return s == strings.TrimSpace(s) && phone.Normalize(s) != ""
 }
 func Receiver(actual, manual, id string) string {
 	if n := phone.Normalize(actual); n != "" {

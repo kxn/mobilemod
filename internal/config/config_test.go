@@ -60,3 +60,11 @@ func FuzzValidNumber(f *testing.F) {
 		}
 	})
 }
+
+func TestNumberValidationRejectsOuterControlCharacters(t *testing.T) {
+	for _, number := range []string{" 50000", "50000 ", "\n50000", "50000\r", "50000\t"} {
+		if ValidNumber(number) {
+			t.Fatal("untrimmed configuration number accepted")
+		}
+	}
+}
