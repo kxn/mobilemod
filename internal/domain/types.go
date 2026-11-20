@@ -89,10 +89,6 @@ type Delivery struct {
 	MessageID string `json:"message_id"`
 	ChatID    string `json:"chat_id"`
 }
-type PostedMessage struct {
-	MessageID, ChatID, Text string
-	OwnBot                  bool
-}
 type ReplyTarget struct {
 	MessageID string    `json:"message_id"`
 	SourceID  string    `json:"source_id"`

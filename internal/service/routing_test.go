@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"github.com/kxn/mobilemod/internal/domain"
-	"github.com/kxn/mobilemod/internal/notify"
 	"github.com/kxn/mobilemod/internal/store"
 	"strings"
 	"testing"
@@ -70,45 +69,6 @@ func TestReplyFollowsNumberToNewModuleAndChecksChat(t *testing.T) {
 	e.Tick(ctx)
 	if other.sends != 1 || d.sends != 0 {
 		t.Fatal("reply fell back to wrong module")
-	}
-}
-
-type parentLookup struct{ value domain.PostedMessage }
-
-func (p parentLookup) LookupMessage(context.Context, string) (domain.PostedMessage, error) {
-	return p.value, nil
-}
-func TestLegacyReplyRequiresOwnBotExactBodyAndStoredSMS(t *testing.T) {
-	for _, variant := range []string{"valid", "other-bot", "altered", "other-chat"} {
-		t.Run(variant, func(t *testing.T) {
-			e, d := engine(t)
-			id := domain.Key("legacy")
-			m := domain.Message{ID: id, Identity: d.state.Identity, From: "+12025550101", Text: "原始短信", Kind: "sms", State: "complete", Parts: 1, Expected: 1, ReceivedAt: time.Now()}
-			e.Store.Update(func(tx *store.Tx) error { return tx.Put("messages", id, m) })
-			posted := domain.PostedMessage{MessageID: "legacy-provider", ChatID: "chat", Text: notify.Format(m), OwnBot: true}
-			switch variant {
-			case "other-bot":
-				posted.OwnBot = false
-			case "altered":
-				posted.Text += "changed"
-			case "other-chat":
-				posted.ChatID = "other"
-			}
-			e.ParentLookup = parentLookup{posted}
-			in := incoming("reply", "literal body  ")
-			in.ParentID = "legacy-provider"
-			e.Accept(context.Background(), in)
-			if err := e.Tick(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			want := 0
-			if variant == "valid" {
-				want = 1
-			}
-			if d.sends != want {
-				t.Fatal("unverified legacy reply sent", variant)
-			}
-		})
 	}
 }
 

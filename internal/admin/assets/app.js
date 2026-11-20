@@ -1,6 +1,5 @@
 'use strict';
 const cards = new Map();
-let token = '';
 let busy = false;
 let nextCard = 0;
 let setupRequired = false;
@@ -39,7 +38,7 @@ function makeCard(id) {
   form.addEventListener('submit',async event=>{
     event.preventDefault();if(state.saving)return;state.saving=true;save.disabled=true;message.textContent='正在保存…';
     try {
-      const response=await fetch('/api/modules/'+encodeURIComponent(id)+'/number',{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:JSON.stringify({sim_key:state.sim,number:input.value})});
+      const response=await fetch('/api/modules/'+encodeURIComponent(id)+'/number',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sim_key:state.sim,number:input.value})});
       if(!response.ok)throw new Error(await response.text());
       state.dirty=false;message.textContent='已保存到当前 SIM';message.className='message ok';
       await refresh();
@@ -49,7 +48,6 @@ function makeCard(id) {
   return state;
 }
 function render(status){
-  token=status.csrf;
   const online=status.modules.filter(m=>m.online).length;
   const feishu=document.querySelector('#feishu');feishu.textContent=status.feishu?'已连接':'未连接';feishu.className=status.feishu?'ok':'off';
   document.querySelector('#online').textContent=online+' / '+status.modules.length;
@@ -85,7 +83,7 @@ async function refresh(){
   try{
     const authResponse=await fetch('/api/auth',{cache:'no-store'});
     if(!authResponse.ok)throw new Error('暂时无法连接管理界面');
-    const auth=await authResponse.json();token=auth.csrf;setupRequired=auth.setup_required;
+    const auth=await authResponse.json();setupRequired=auth.setup_required;
     document.querySelector('#authentication').hidden=auth.authenticated;
     document.querySelector('#gateway').hidden=!auth.authenticated;
     document.querySelector('#logout').hidden=!auth.authenticated;
@@ -109,7 +107,7 @@ async function refresh(){
 }
 
 async function mutate(path,method,body){
-  const response=await fetch(path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:JSON.stringify(body)});
+  const response=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!response.ok)throw new Error((await response.text()).trim()||'请求失败');
 }
 document.querySelector('#auth-form').addEventListener('submit',async event=>{

@@ -3,13 +3,9 @@ package admin
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
-	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,22 +20,21 @@ type Status struct {
 	Feishu               bool             `json:"feishu"`
 	Modules              []modem.Snapshot `json:"modules"`
 	PendingNotifications int              `json:"pending_notifications"`
-	CSRF                 string           `json:"csrf"`
 	FeishuAppID          string           `json:"feishu_app_id"`
 	FeishuSecretSet      bool             `json:"feishu_secret_set"`
 }
 type Backend interface {
 	AdminStatus() (Status, error)
 	SetModuleNumber(module, sim, number string) error
+	SetFeishu(context.Context, string, string) error
 }
 type Handler struct {
-	backend    Backend
-	host, csrf string
-	Auth       *Auth
+	backend Backend
+	Auth    *Auth
 }
 
-func New(backend Backend, host string) *Handler {
-	return &Handler{backend: backend, host: host, csrf: rand.Text()}
+func New(backend Backend, auth *Auth) *Handler {
+	return &Handler{backend: backend, Auth: auth}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -47,14 +42,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-	if !h.validHost(r.Host) {
-		http.Error(w, "Invalid host", http.StatusForbidden)
-		return
-	}
-	if origin := r.Header.Get("Origin"); origin != "" && origin != requestOrigin(r) {
-		http.Error(w, "Invalid origin", http.StatusForbidden)
-		return
-	}
 	if h.Auth != nil && (r.URL.Path == "/api/auth" || strings.HasPrefix(r.URL.Path, "/api/auth/")) {
 		h.serveAuth(w, r)
 		return
@@ -74,7 +61,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Status unavailable", 503)
 				return
 			}
-			s.CSRF = h.csrf
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			json.NewEncoder(w).Encode(s)
 		case "/", "/assets/app.js", "/assets/style.css":
@@ -106,17 +92,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.validMutation(r) {
-		http.Error(w, "Invalid request token", 403)
+		http.Error(w, "Invalid origin", 403)
 		return
 	}
 	if r.URL.Path == "/api/feishu" {
-		backend, ok := h.backend.(interface {
-			SetFeishu(context.Context, string, string) error
-		})
-		if !ok {
-			http.Error(w, "配置接口不可用", 503)
-			return
-		}
 		var body struct {
 			AppID  string `json:"app_id"`
 			Secret string `json:"app_secret"`
@@ -124,15 +103,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !decodeBody(w, r, &body) {
 			return
 		}
-		if err := backend.SetFeishu(r.Context(), body.AppID, body.Secret); err != nil {
+		if err := h.backend.SetFeishu(r.Context(), body.AppID, body.Secret); err != nil {
 			http.Error(w, "飞书认证校验或保存失败；原配置仍然生效", 400)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/json" {
-		http.Error(w, "JSON required", 415)
 		return
 	}
 	const prefix = "/api/modules/"
@@ -171,23 +146,8 @@ func requestOrigin(r *http.Request) string {
 	}
 	return scheme + "://" + r.Host
 }
-func (h *Handler) validHost(host string) bool {
-	bind, port, err := net.SplitHostPort(h.host)
-	if err != nil {
-		return false
-	}
-	name, requestPort, err := net.SplitHostPort(host)
-	if err != nil || requestPort != port {
-		return false
-	}
-	ip := net.ParseIP(bind)
-	if ip != nil && ip.IsUnspecified() {
-		return net.ParseIP(name) != nil || name == "localhost"
-	}
-	return host == h.host || (ip != nil && ip.IsLoopback() && name == "localhost")
-}
 func (h *Handler) validMutation(r *http.Request) bool {
-	return r.Header.Get("Origin") == requestOrigin(r) && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(h.csrf)) == 1
+	return r.Header.Get("Origin") == requestOrigin(r)
 }
 func decodeBody(w http.ResponseWriter, r *http.Request, body any) bool {
 	if strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/json" {
@@ -196,13 +156,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, body any) bool {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
 	if err := d.Decode(body); err != nil {
-		http.Error(w, "Invalid request", 400)
-		return false
-	}
-	var extra any
-	if d.Decode(&extra) != io.EOF {
 		http.Error(w, "Invalid request", 400)
 		return false
 	}
@@ -226,11 +180,11 @@ func (h *Handler) serveAuth(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/auth" && r.Method == http.MethodGet {
 		setup, authenticated := h.Auth.State(sessionToken(r))
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"setup_required": setup, "authenticated": authenticated, "csrf": h.csrf})
+		json.NewEncoder(w).Encode(map[string]any{"setup_required": setup, "authenticated": authenticated})
 		return
 	}
 	if (r.Method != http.MethodPost && r.Method != http.MethodPut) || !h.validMutation(r) {
-		http.Error(w, "Invalid request token or method", 403)
+		http.Error(w, "Invalid origin or method", 403)
 		return
 	}
 	var body struct {

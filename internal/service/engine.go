@@ -24,12 +24,9 @@ type Device interface {
 	Send(context.Context, string, string, string, domain.Identity) (domain.Envelope, error)
 }
 type Engine struct {
-	Config       config.Config
-	Store        *store.Store
-	Modules      map[string]Device
-	ParentLookup interface {
-		LookupMessage(context.Context, string) (domain.PostedMessage, error)
-	}
+	Config  config.Config
+	Store   *store.Store
+	Modules map[string]Device
 }
 
 func contains(values []string, s string) bool {

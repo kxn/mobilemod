@@ -67,7 +67,6 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 	r.feishu.factory = func(client *feishu.Client) EventListener {
 		return &feishu.Listener{AppID: client.AppID, Secret: client.Secret, Log: log, Handle: r.Engine.Accept}
 	}
-	r.Engine.ParentLookup = r.feishu
 	r.assembler = &sms.Assembler{Store: db, Recipients: c.Feishu.Recipients, Timeout: time.Duration(c.AssemblyTimeoutSeconds) * time.Second, MaxParts: c.MaxParts}
 	for _, cfg := range c.Modules {
 		m := modem.New(cfg, db, log)
@@ -116,8 +115,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return err
 		}
 		mux := http.NewServeMux()
-		web := admin.New(r, listener.Addr().String())
-		web.Auth = r.adminAuth
+		web := admin.New(r, r.adminAuth)
 		mux.Handle("/", web)
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
 			if req.Method != http.MethodGet {

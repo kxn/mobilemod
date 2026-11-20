@@ -50,36 +50,15 @@ func NewAuth(db *store.Store, setupPath string) (*Auth, error) {
 		}
 		return a, nil
 	}
-	if info, err := os.Lstat(setupPath); err == nil {
-		if !info.Mode().IsRegular() {
-			return nil, errors.New("admin setup file must be a regular file")
-		}
-		b, err := os.ReadFile(setupPath)
-		if err != nil {
-			return nil, err
-		}
-		if len(b) < 24 || len(b) > 128 {
-			return nil, errors.New("invalid admin setup file")
-		}
-		if err := os.Chmod(setupPath, 0600); err != nil {
-			return nil, err
-		}
-		a.setupCode = string(b)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	} else {
-		a.setupCode = rand.Text()
-		f, err := os.OpenFile(setupPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return nil, err
-		}
-		_, writeErr := f.WriteString(a.setupCode)
-		syncErr := f.Sync()
-		closeErr := f.Close()
-		if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
-			return nil, err
-		}
+	b, err := os.ReadFile(setupPath)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && len(b) == 0) {
+		b = []byte(rand.Text())
+		err = os.WriteFile(setupPath, b, 0600)
 	}
+	if err != nil {
+		return nil, err
+	}
+	a.setupCode = string(b)
 	return a, nil
 }
 
@@ -119,16 +98,6 @@ func (a *Auth) session() string {
 		if !now.Before(deadline) {
 			delete(a.sessions, token)
 		}
-	}
-	if len(a.sessions) >= 128 {
-		var oldest string
-		var deadline time.Time
-		for token, at := range a.sessions {
-			if oldest == "" || at.Before(deadline) {
-				oldest, deadline = token, at
-			}
-		}
-		delete(a.sessions, oldest)
 	}
 	token := rand.Text()
 	a.sessions[token] = now.Add(sessionLifetime)

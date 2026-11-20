@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,15 +136,7 @@ func (c Config) Validate() error {
 			return errors.New("invalid allowed destination")
 		}
 	}
-	if c.HealthListen != "" {
-		host, port, err := net.SplitHostPort(c.HealthListen)
-		if err != nil || net.ParseIP(host) == nil || port == "" {
-			return errors.New("health_listen requires a literal IP and port, for example 0.0.0.0:8765")
-		}
-		if _, err := net.LookupPort("tcp", port); err != nil {
-			return errors.New("invalid health listener port")
-		}
-	}
+
 	return nil
 }
 func ValidNumber(s string) bool {

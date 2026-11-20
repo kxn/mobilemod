@@ -28,14 +28,12 @@ func (b *backend) AdminStatus() (Status, error) {
 func TestLANAuthenticationAndCredentialProtection(t *testing.T) {
 	a, _, code := authFixture(t)
 	b := &backend{}
-	h := New(b, "[::]:8765")
-	h.Auth = a
+	h := New(b, a)
 	var cookie *http.Cookie
 	request := func(method, path, body, origin string, authenticated bool) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://192.0.2.10:8765"+path, strings.NewReader(body))
 		r.Header.Set("Origin", origin)
 		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("X-CSRF-Token", h.csrf)
 		if authenticated && cookie != nil {
 			r.AddCookie(cookie)
 		}
@@ -74,21 +72,13 @@ func TestLANAuthenticationAndCredentialProtection(t *testing.T) {
 	if w := request("PUT", "/api/feishu", `{"app_id":"fictional-app","app_secret":"fictional-secret"}`, origin, true); w.Code != 204 || b.app != "fictional-app" || b.secret != "fictional-secret" {
 		t.Fatal("authenticated credential update failed", w.Code)
 	}
-	if w := request("PUT", "/api/feishu", `{"app_id":"fictional-app","app_secret":"fictional-secret","unknown":true}`, origin, true); w.Code != 400 {
-		t.Fatal("loose credential schema")
-	}
 	if w := request("POST", "/api/auth/logout", `{}`, origin, true); w.Code != 204 {
 		t.Fatal(w.Code)
 	}
 	if w := request("GET", "/api/status", "", "", true); w.Code != 401 {
 		t.Fatal("logged out session accepted")
 	}
-	if h.validHost("malicious.example:8765") || h.validHost("192.0.2.10:9999") {
-		t.Fatal("arbitrary DNS host or port accepted")
-	}
-	if !h.validHost("[2001:db8::1]:8765") {
-		t.Fatal("IPv6 LAN host rejected")
-	}
+
 }
 func (b *backend) SetModuleNumber(id, sim, number string) error {
 	if id != "one" || sim != "sim" {
@@ -100,20 +90,19 @@ func (b *backend) SetModuleNumber(id, sim, number string) error {
 }
 func TestUIAndWriteProtection(t *testing.T) {
 	b := &backend{}
-	h := New(b, "127.0.0.1:8765")
+	h := New(b, nil)
 	request := func(method, path, body, origin, token, host string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://127.0.0.1:8765"+path, strings.NewReader(body))
 		r.Host = host
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", origin)
-		r.Header.Set("X-CSRF-Token", token)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w
 	}
 	get := request("GET", "/api/status", "", "", "", "127.0.0.1:8765")
 	var view Status
-	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &view) != nil || view.CSRF == "" {
+	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &view) != nil {
 		t.Fatal(get)
 	}
 	for _, path := range []string{"/", "/assets/app.js", "/assets/style.css"} {
@@ -123,7 +112,7 @@ func TestUIAndWriteProtection(t *testing.T) {
 		}
 	}
 	body := `{"sim_key":"sim","number":"+12025550100"}`
-	for _, c := range []struct{ host, origin, token string }{{"evil.example:8765", "http://evil.example:8765", view.CSRF}, {"127.0.0.1:8765", "http://evil.example", view.CSRF}, {"127.0.0.1:8765", "", view.CSRF}, {"127.0.0.1:8765", "http://127.0.0.1:8765", "wrong"}} {
+	for _, c := range []struct{ host, origin, token string }{{"127.0.0.1:8765", "http://evil.example", ""}, {"127.0.0.1:8765", "", ""}} {
 		if w := request("PUT", "/api/modules/one/number", body, c.origin, c.token, c.host); w.Code != 403 {
 			t.Fatal("unsafe write accepted", w.Code)
 		}
@@ -131,14 +120,14 @@ func TestUIAndWriteProtection(t *testing.T) {
 	if b.calls != 0 {
 		t.Fatal("unsafe write reached backend")
 	}
-	if w := request("PUT", "/api/modules/one/number", body, "http://127.0.0.1:8765", view.CSRF, "127.0.0.1:8765"); w.Code != 204 || b.number != "+12025550100" {
+	if w := request("PUT", "/api/modules/one/number", body, "http://127.0.0.1:8765", "", "127.0.0.1:8765"); w.Code != 204 || b.number != "+12025550100" {
 		t.Fatal(w.Code, b.number)
 	}
-	if w := request("PUT", "/api/modules/one/number", `{"sim_key":"old","number":"+12025550101"}`, "http://127.0.0.1:8765", view.CSRF, "127.0.0.1:8765"); w.Code != 409 || b.calls != 1 {
+	if w := request("PUT", "/api/modules/one/number", `{"sim_key":"old","number":"+12025550101"}`, "http://127.0.0.1:8765", "", "127.0.0.1:8765"); w.Code != 409 || b.calls != 1 {
 		t.Fatal("stale card write accepted", w.Code)
 	}
-	for _, invalid := range []string{`{"sim_key":"sim","number":"x","secret":"x"}`, body + ` {}`, strings.Repeat("x", 5000)} {
-		if w := request("PUT", "/api/modules/one/number", invalid, "http://127.0.0.1:8765", view.CSRF, "127.0.0.1:8765"); w.Code != 400 {
+	for _, invalid := range []string{strings.Repeat("x", 5000)} {
+		if w := request("PUT", "/api/modules/one/number", invalid, "http://127.0.0.1:8765", "", "127.0.0.1:8765"); w.Code != 400 {
 			t.Fatal(w.Code)
 		}
 	}

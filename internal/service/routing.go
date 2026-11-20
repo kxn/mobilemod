@@ -3,14 +3,10 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/kxn/mobilemod/internal/domain"
 	"github.com/kxn/mobilemod/internal/modem"
-	"github.com/kxn/mobilemod/internal/notify"
 	"github.com/kxn/mobilemod/internal/phone"
 	"github.com/kxn/mobilemod/internal/store"
 )
@@ -53,14 +49,11 @@ func (e *Engine) submitFrom(ctx context.Context, id, from, to, text string) stri
 func (e *Engine) handleSMSReply(ctx context.Context, job domain.CommandJob) error {
 	var target domain.ReplyTarget
 	err := e.Store.View(func(tx *store.Tx) error { return tx.Get("replies", job.Incoming.ParentID, &target) })
-	if os.IsNotExist(err) && e.ParentLookup != nil {
-		target, err = e.legacyReplyTarget(ctx, job.Incoming)
-	}
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		}
-		return e.reply(job, "引用的消息没有可验证的短信关联，未发送。请直接引用新版本转发的短信，或使用 /sms 发送号码 目标号码 正文。")
+		return e.reply(job, "找不到这条引用消息对应的短信，请使用 /sms 发送号码 目标号码 正文。")
 	}
 	if target.ChatID != job.Incoming.ChatID {
 		return e.reply(job, "引用消息不属于当前会话，未发送")
@@ -85,46 +78,4 @@ func (e *Engine) handleSMSReply(ctx context.Context, job domain.CommandJob) erro
 		return e.reply(job, "原短信的SIM不在线或尚未配置号码，未发送；请检查管理页。")
 	}
 	return e.reply(job, e.submitFrom(ctx, job.Incoming.MessageID, target.Receiver, target.From, job.Incoming.Text))
-}
-
-func (e *Engine) legacyReplyTarget(ctx context.Context, in domain.Incoming) (domain.ReplyTarget, error) {
-	posted, err := e.ParentLookup.LookupMessage(ctx, in.ParentID)
-	if err != nil || !posted.OwnBot || posted.ChatID != in.ChatID {
-		return domain.ReplyTarget{}, os.ErrNotExist
-	}
-	header, _, _ := strings.Cut(posted.Text, "\n\n")
-	id := ""
-	for _, line := range strings.Split(header, "\n") {
-		if strings.HasPrefix(line, "消息ID：") {
-			id = strings.TrimPrefix(line, "消息ID：")
-			break
-		}
-	}
-	if len(id) != 32 {
-		return domain.ReplyTarget{}, os.ErrNotExist
-	}
-	var source domain.Message
-	if err := e.Store.View(func(tx *store.Tx) error { return tx.Get("messages", id, &source) }); err != nil {
-		return domain.ReplyTarget{}, os.ErrNotExist
-	}
-	if source.Kind != "sms" {
-		return domain.ReplyTarget{}, os.ErrNotExist
-	}
-	parts := notify.Split(notify.Format(source), 2500)
-	match := false
-	for i, p := range parts {
-		if len(parts) > 1 {
-			p = fmt.Sprintf("[转发 %d/%d]\n", i+1, len(parts)) + p
-		}
-		if p == posted.Text {
-			match = true
-			break
-		}
-	}
-	if !match {
-		return domain.ReplyTarget{}, os.ErrNotExist
-	}
-	target := domain.ReplyTarget{MessageID: in.ParentID, SourceID: source.ID, ChatID: in.ChatID, Receiver: source.Identity.Receiver, From: source.From, SIM: source.Identity.SIM, CreatedAt: time.Now(), Module: source.Identity.Module}
-	err = e.Store.Update(func(tx *store.Tx) error { return tx.Put("replies", in.ParentID, target) })
-	return target, err
 }

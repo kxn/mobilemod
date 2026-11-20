@@ -49,9 +49,6 @@ func (m *managedFeishu) SendTracked(ctx context.Context, to domain.Recipient, te
 func (m *managedFeishu) SendText(ctx context.Context, to domain.Recipient, text, uuid string) error {
 	return m.current().SendText(ctx, to, text, uuid)
 }
-func (m *managedFeishu) LookupMessage(ctx context.Context, id string) (domain.PostedMessage, error) {
-	return m.current().LookupMessage(ctx, id)
-}
 func (m *managedFeishu) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		// Drain earlier updates before installing the latest listener.

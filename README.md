@@ -63,7 +63,7 @@ Linux/macOS 使用 `./mobilemod`。数据库路径相对于配置文件目录解
 
 发送号码必须能唯一匹配一个在线模块的当前接收号码，不再用模块 ID 发送。模块 ID 保留用于显示、状态查询及本地维护。国内手机号可以带或不带 +86；短业务号码保留原样，其他国际号码保留明确的 + 国别号。正文从目标号码后的第一个分隔空白之后开始，后续字符不再 Trim；额外的前导空格、连续空格、换行及末尾空格都会参与发送和长度校验。GSM 7-bit 最多 160 单位，UCS-2 中文最多 70 字，不接受非 BMP emoji。
 
-在飞书中直接引用回复机器人转发的短信，回复文本会作为短信正文。原 SIM 换到另一个模块后仍按号码寻找；原号码不在线、出现重复号码或发送前换卡，都会拒绝。若原消息接收号码当时未知，仅在能确认同一张 SIM 且现已配置号码时允许回复。回复不同会话、非本机器人或无法核验的消息不会触发发送。旧版本消息会通过飞书 API 和本地原短信逐字核验，验证成功才补建关联；本地原记录已过期或权限不足时，改用显式 `/sms`。
+在飞书中直接引用回复机器人转发的短信，回复文本会作为短信正文。原 SIM 换到另一个模块后仍按号码寻找；原号码不在线、出现重复号码或发送前换卡，都会拒绝。若原消息接收号码当时未知，仅在能确认同一张 SIM 且现已配置号码时允许回复。引用消息必须有本地保存的短信关联并属于当前会话；0.4 之前没有关联的旧消息或记录已过期时，使用显式 `/sms`。
 
 呼转类型：`unconditional`（无条件）、`busy`（遇忙）、`no_reply`（无人接听）、`unreachable`（不可及）。当前配置会明确回复“不支持”，不会拨号或假报成功。只有拿到运营商确认可用的短信业务模板后，才能按 [适配说明](docs/architecture.md) 开启 SMS 后端；业务状态以运营商回复为准。
 
@@ -90,15 +90,14 @@ mobilemod send -config config.local.json -module sim-1 -to <目标号码> -text 
 ## 开发与验证
 
 ```text
-go test ./... -count=1 -coverprofile coverage.out
-go test -race ./... -count=1
+go test -race ./... -count=1 -coverprofile coverage.out
 go vet ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 ```
 
-自动测试使用模拟串口和飞书服务器，不需要飞书凭据、不访问真实设备、不发收费短信；测试中的号码和标识均为虚构数据。固件测试执行实际 `gateway.lua`，模拟 Flash、重启、串口和 SMS 回调。Windows 的 race 检测需要 MinGW-w64 GCC；Linux CI 在原生 amd64/arm64 执行 race，同时测试 Windows/macOS。
+自动测试使用模拟串口和飞书服务器，不需要飞书凭据、不访问真实设备、不发收费短信；测试中的号码和标识均为虚构数据。固件测试执行实际 `gateway.lua`，模拟 Flash、重启、串口和 SMS 回调。Windows 的 race 检测需要 MinGW-w64 GCC。CI 在一个 Linux runner 上运行测试，不在多个系统重复执行。
 
-统一跨平台打包：`go run ./tools/release -version v0.4.0`。Windows 也可使用 `scripts/build.ps1`。打包器通过明确的公开文件清单组包，保留 Linux 可执行权限，生成五个 64 位平台包及校验和；不会递归打包工作区或带入私有配置。CI 对 Git 全历史执行 Gitleaks，额外检查个人号码、飞书标识和私有文件路径，tag 发版需整套 CI 通过。
+统一跨平台打包：`go run ./tools/release -version v0.4.1`。Windows 也可使用 `scripts/build.ps1`。打包器按公开文件清单生成五个 64 位平台包及校验和。main 的 CI 跑一次测试、静态检查、Gitleaks 和漏洞检查；版本 tag 只打包发布，不重复跑整套 CI。
 
 ## 从 0.3 升级
 

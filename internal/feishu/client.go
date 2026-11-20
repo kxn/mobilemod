@@ -43,18 +43,11 @@ func (c *Client) ValidateCredentials(ctx context.Context) error {
 	return err
 }
 func (c *Client) request(ctx context.Context, path, token string, body any, out any) error {
-	return c.requestMethod(ctx, http.MethodPost, path, token, body, out)
-}
-func (c *Client) requestMethod(ctx context.Context, method, path, token string, body any, out any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(b)
-	}
-	r, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
@@ -89,49 +82,6 @@ func (c *Client) requestMethod(ctx context.Context, method, path, token string, 
 	return nil
 }
 
-// LookupMessage is used only to verify older forwarded SMS messages whose
-// provider IDs were not persisted before the reply feature was installed.
-func (c *Client) LookupMessage(ctx context.Context, id string) (domain.PostedMessage, error) {
-	if id == "" || len(id) > 256 {
-		return domain.PostedMessage{}, fmt.Errorf("invalid message id")
-	}
-	token, err := c.accessToken(ctx)
-	if err != nil {
-		return domain.PostedMessage{}, err
-	}
-	var response struct {
-		Data struct {
-			Items []struct {
-				MessageID string `json:"message_id"`
-				ChatID    string `json:"chat_id"`
-				Type      string `json:"msg_type"`
-				Sender    struct {
-					ID     string `json:"id"`
-					Type   string `json:"sender_type"`
-					IDType string `json:"id_type"`
-				} `json:"sender"`
-				Body struct {
-					Content string `json:"content"`
-				} `json:"body"`
-			} `json:"items"`
-		} `json:"data"`
-	}
-	err = c.requestMethod(ctx, http.MethodGet, "/open-apis/im/v1/messages/"+url.PathEscape(id), token, nil, &response)
-	if err != nil {
-		return domain.PostedMessage{}, err
-	}
-	if len(response.Data.Items) != 1 {
-		return domain.PostedMessage{}, fmt.Errorf("message unavailable")
-	}
-	m := response.Data.Items[0]
-	var content struct {
-		Text string `json:"text"`
-	}
-	if m.MessageID != id || m.Type != "text" || json.Unmarshal([]byte(m.Body.Content), &content) != nil {
-		return domain.PostedMessage{}, fmt.Errorf("unsupported message")
-	}
-	return domain.PostedMessage{MessageID: m.MessageID, ChatID: m.ChatID, Text: content.Text, OwnBot: m.Sender.Type == "app" && m.Sender.IDType == "app_id" && m.Sender.ID == c.AppID}, nil
-}
 func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
