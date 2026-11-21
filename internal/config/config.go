@@ -140,12 +140,3 @@ func (c Config) Validate() error {
 func ValidNumber(s string) bool {
 	return s == strings.TrimSpace(s) && phone.Normalize(s) != ""
 }
-func Receiver(actual, manual, id string) string {
-	if n := phone.Normalize(actual); n != "" {
-		return n
-	}
-	if n := phone.Normalize(manual); n != "" {
-		return n
-	}
-	return id
-}

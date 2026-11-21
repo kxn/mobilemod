@@ -45,17 +45,16 @@ func (r *Runtime) recipientsSnapshot() []domain.Recipient {
 func (r *Runtime) setRecipient(sender string) (bool, error) {
 	target := domain.Recipient{Type: "open_id", ID: sender}
 	r.recipientsMu.Lock()
+	defer r.recipientsMu.Unlock()
 	if len(r.recipients) == 1 && r.recipients[0] == target {
-		r.recipientsMu.Unlock()
 		return false, nil
 	}
-	r.recipients = []domain.Recipient{target}
-	r.recipientsMu.Unlock()
 	if err := r.Store.Update(func(tx *store.Tx) error {
 		return tx.Put("settings", lastSenderSetting, target)
 	}); err != nil {
-		return true, err
+		return false, err
 	}
+	r.recipients = []domain.Recipient{target}
 	return true, nil
 }
 

@@ -166,7 +166,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 					return
 				case <-t.C:
 					if err := r.Engine.Tick(ctx); err != nil {
-						r.Log.Error("command worker persistence failure")
+						r.Log.Error("command worker persistence failure", "error", err)
 					}
 				}
 			}
@@ -184,10 +184,10 @@ func (r *Runtime) Run(ctx context.Context) error {
 				return
 			case now := <-t.C:
 				if err := worker.Tick(ctx, now); err != nil && ctx.Err() == nil {
-					r.Log.Error("notification worker persistence failure")
+					r.Log.Error("notification worker persistence failure", "error", err)
 				}
 				if err := r.assembler.Expire(now); err != nil {
-					r.Log.Error("assembly expiration persistence failure")
+					r.Log.Error("assembly expiration persistence failure", "error", err)
 				}
 			}
 		}
@@ -203,7 +203,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 				return
 			case now := <-t.C:
 				if err := r.Engine.Cleanup(now); err != nil {
-					r.Log.Error("retention cleanup failed")
+					r.Log.Error("retention cleanup failed", "error", err)
 				}
 			}
 		}

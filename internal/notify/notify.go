@@ -183,12 +183,10 @@ func (w Worker) Tick(ctx context.Context, now time.Time) error {
 		if err == nil {
 			t := now
 			item.SentAt = &t
-			item.LastCode = ""
 			item.LastError = ""
 			item.ProviderID = delivery.MessageID
 			item.ChatID = delivery.ChatID
 		} else {
-			item.LastCode = "delivery_failed"
 			item.LastError = truncate(err.Error(), 500)
 			t := now
 			item.LastAttemptAt = &t

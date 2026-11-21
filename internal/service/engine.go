@@ -175,7 +175,11 @@ func (e *Engine) Tick(ctx context.Context) error {
 		}
 		sort.Strings(ids)
 		if len(ids) == 0 {
-			result = "模块ID不存在"
+			if c.Module == "" {
+				result = "未发现模块"
+			} else {
+				result = "未找到匹配的模块或接收号码"
+			}
 		}
 		for _, id := range ids {
 			s := e.devices()[id].Snapshot()

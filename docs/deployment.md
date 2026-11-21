@@ -24,10 +24,10 @@ COM 号可能随 USB 插口变化。用设备管理器核对 `MI_06` 用户串�
 路径与 [mobilemod.service](../deploy/mobilemod.service) 一致：
 
 1. 创建专用无登录账户 `mobilemod`，加入串口访问组（通常 `dialout`），准备 `/var/lib/mobilemod` 为该用户独占。
-2. 安装二进制至 `/opt/mobilemod/mobilemod`；配置 `/etc/mobilemod/config.json`，数据库设为 `/var/lib/mobilemod/gateway.db`，端口使用 `/dev/serial/by-id/...` 稳定路径。
+2. 安装二进制至 `/opt/mobilemod/mobilemod`；配置 `/etc/mobilemod/config.json`，数据库设为 `/var/lib/mobilemod/gateway.db`。默认 `auto_discover: true` 无需填写端口；手工模式使用 `/dev/serial/by-id/...` 稳定路径。
 3. `/etc/mobilemod/environment` 写入 `MOBILEMOD_FEISHU_APP_SECRET=自己的密钥`，权限 0600；配置权限 0640，组为 mobilemod。
 4. 安装 unit，执行 `systemctl daemon-reload`、`systemctl enable --now mobilemod`。
-5. 查看 `journalctl -u mobilemod`、本机 `/readyz` 和飞书 `/status`；检查所有模块数量。
+5. 查看 `journalctl -u mobilemod`、本机 `/readyz`，并在飞书向机器人发送 `/status`；检查所有模块数量。
 
 服务需要串口访问和出站 HTTPS/WebSocket，不需要 root。串口组名不同时修改 unit。`ProtectHome=true`，生产配置和数据库不要放在用户家目录。
 

@@ -18,14 +18,6 @@ func TestParse(t *testing.T) {
 		t.Fatal(c.Text)
 	}
 }
-func TestHelpHasNoDisclaimer(t *testing.T) {
-	for _, s := range []string{"不代表", "不等于", "取决于", "明确拒绝", "送达"} {
-		if strings.Contains(Help, s) {
-			t.Fatalf("help contains %q: %s", s, Help)
-		}
-	}
-}
-
 func TestRejectMalformedCommands(t *testing.T) {
 	for _, s := range []string{"", "/sms", "/sms a +86;echo x", "/sms a 50000 ", "/status a b", "/help extra", "/forward a cancel random", "/forward a set all 50000", "/forward a set busy 50000 extra", "/sms a 50000 " + strings.Repeat("中", 71), "/lua os.execute()"} {
 		if _, e := Parse(s); e == nil {

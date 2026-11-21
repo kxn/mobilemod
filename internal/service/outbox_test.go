@@ -22,7 +22,7 @@ func TestReconcilePendingRecipientsSingleTarget(t *testing.T) {
 	target := domain.Recipient{Type: "open_id", ID: "ou_new"}
 	sentAt := now.Add(-time.Hour)
 	items := []domain.Outbox{
-		{ID: "pending", Recipient: oldRecipient, Forward: true, Attempts: 7, NextAttempt: now.Add(time.Hour), LastCode: "delivery_failed", LastError: "open_id cross app", LastAttemptAt: &attempted},
+		{ID: "pending", Recipient: oldRecipient, Forward: true, Attempts: 7, NextAttempt: now.Add(time.Hour), LastError: "open_id cross app", LastAttemptAt: &attempted},
 		{ID: "already", Recipient: target, Attempts: 2, NextAttempt: now.Add(time.Hour)},
 		{ID: "sent", Recipient: oldRecipient, Attempts: 3, SentAt: &sentAt},
 		{ID: "reply", Recipient: oldRecipient, Attempts: 1, NextAttempt: now.Add(time.Hour)},
@@ -44,7 +44,7 @@ func TestReconcilePendingRecipientsSingleTarget(t *testing.T) {
 	if pending.Recipient != target {
 		t.Fatalf("pending recipient: %+v", pending.Recipient)
 	}
-	if pending.Attempts != 0 || pending.LastCode != "" || pending.LastError != "" || pending.LastAttemptAt != nil {
+	if pending.Attempts != 0 || pending.LastError != "" || pending.LastAttemptAt != nil {
 		t.Fatalf("pending retry state not reset: %+v", pending)
 	}
 	if !pending.NextAttempt.Equal(now) {

@@ -60,13 +60,6 @@ func TestWebOnlyCredentialBootstrap(t *testing.T) {
 		t.Fatal("partial credentials accepted")
 	}
 }
-func TestReceiverPriority(t *testing.T) {
-	for _, c := range [][4]string{{"+12025550100", "+12025550101", "id", "+12025550100"}, {"", "+12025550101", "id", "+12025550101"}, {"", "", "id", "id"}, {"000000", "", "id", "id"}} {
-		if got := Receiver(c[0], c[1], c[2]); got != c[3] {
-			t.Fatal(got, c)
-		}
-	}
-}
 func TestLoadEnvironmentAndStrictJSON(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	raw := `{"database":"state.db","feishu":{"app_id":"a","secret_env":"MOBILEMOD_TEST_SECRET","allowed_users":["owner"],"recipients":[{"type":"open_id","id":"owner"}]},"modules":[{"id":"a","port":"COM1"}]}`

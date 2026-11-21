@@ -17,13 +17,6 @@ type Metadata struct {
 	Ref      int `json:"refNum"`
 	Sequence int `json:"seqNum"`
 	Total    int `json:"maxNum"`
-	Year     int `json:"year"`
-	Month    int `json:"mon"`
-	Day      int `json:"day"`
-	Hour     int `json:"hour"`
-	Minute   int `json:"min"`
-	Second   int `json:"sec"`
-	Timezone int `json:"tz"`
 }
 
 type Envelope struct {
@@ -42,7 +35,6 @@ type Envelope struct {
 	Protocol        int             `json:"protocol,omitempty"`
 	Network         int             `json:"network,omitempty"`
 	CSQ             int             `json:"csq,omitempty"`
-	RSRP            int             `json:"rsrp,omitempty"`
 	SMSReady        bool            `json:"sms_ready_event_seen,omitempty"`
 	Submitted       *bool           `json:"submitted,omitempty"`
 	State           string          `json:"state,omitempty"`
@@ -78,7 +70,6 @@ type Outbox struct {
 	NextAttempt   time.Time    `json:"next_attempt"`
 	Attempts      int          `json:"attempts"`
 	SentAt        *time.Time   `json:"sent_at,omitempty"`
-	LastCode      string       `json:"last_code,omitempty"`
 	LastError     string       `json:"last_error,omitempty"`
 	LastAttemptAt *time.Time   `json:"last_attempt_at,omitempty"`
 	Forward       bool         `json:"forward,omitempty"`

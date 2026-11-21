@@ -48,7 +48,6 @@ func (r *Runtime) reconcilePendingRecipients(now time.Time) error {
 			item.Recipient = target
 			item.Attempts = 0
 			item.NextAttempt = now
-			item.LastCode = ""
 			item.LastError = ""
 			item.LastAttemptAt = nil
 			changes = append(changes, rebind{key: key, item: item})

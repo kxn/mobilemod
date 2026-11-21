@@ -29,8 +29,6 @@ type Snapshot struct {
 	Network        int             `json:"network"`
 	CSQ            int             `json:"csq"`
 	Ready          bool            `json:"sms_ready"`
-	LastSeen       time.Time       `json:"last_seen"`
-	Error          string          `json:"error,omitempty"`
 	Identity       domain.Identity `json:"-"`
 	SIMKey         string          `json:"sim_key"`
 	DetectedNumber string          `json:"detected_number"`
@@ -108,7 +106,7 @@ func (m *Module) acceptStatus(e domain.Envelope) error {
 	m.mu.RLock()
 	port := m.status.Port
 	m.mu.RUnlock()
-	s := Snapshot{ID: m.Config.ID, Port: port, Online: true, DetectedNumber: e.Number, SIMKey: simHash(e.ICCID), Core: e.Core, Protocol: e.Protocol, Network: e.Network, CSQ: e.CSQ, Ready: e.SMSReady, LastSeen: time.Now(), GuardedSend: e.Protocol >= 3 && e.Capabilities["guarded_send"], IncomingCalls: e.Capabilities["incoming_calls"], PassiveCalls: e.Capabilities["passive_call_listener"]}
+	s := Snapshot{ID: m.Config.ID, Port: port, Online: true, DetectedNumber: e.Number, SIMKey: simHash(e.ICCID), Core: e.Core, Protocol: e.Protocol, Network: e.Network, CSQ: e.CSQ, Ready: e.SMSReady, GuardedSend: e.Protocol >= 3 && e.Capabilities["guarded_send"], IncomingCalls: e.Capabilities["incoming_calls"], PassiveCalls: e.Capabilities["passive_call_listener"]}
 	s.Identity = domain.Identity{Module: m.Config.ID, Receiver: s.Receiver, SIM: simHash(e.ICCID)}
 	s = m.resolveNumber(s)
 	m.mu.Lock()
@@ -228,7 +226,6 @@ func (m *Module) Run(ctx context.Context) {
 		m.mu.Lock()
 		m.status.Online = false
 		m.status.Ready = false
-		m.status.Error = "disconnected or identity/protocol mismatch"
 		m.mu.Unlock()
 		if ctx.Err() != nil {
 			return

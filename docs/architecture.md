@@ -30,7 +30,7 @@
 | `service` | ACL、持久化任务、发送记录/限额、恢复、生命周期与健康接口 |
 | `firmwaretest` | 用 GopherLua 执行真实 Lua 源码的硬件模拟测试 |
 
-数据库 buckets：`raw` 原始事件、`groups` 长短信组、`messages` 转发消息、`outbox` 飞书发送队列、`commands` 用户任务、`sends` 短信发送记录、`settings` 物理绑定和告警去重、`number_bindings` 按 SIM 哈希绑定的手工号码、`replies` 飞书消息 ID 到原短信的关联。没有关闭 bbolt 的同步写入。进程中断后运行中的命令不会重新执行，回复明确提示检查结果；待执行但超过五分钟的命令失效。
+数据库 buckets：`raw` 原始事件、`groups` 长短信组、`messages` 转发消息、`outbox` 飞书发送队列、`commands` 用户任务、`sends` 短信发送记录、`settings` 物理绑定和告警去重、`number_bindings` 按 SIM 哈希绑定的手工号码、`replies` 飞书消息 ID 到原短信的关联。没有关闭 bbolt 的同步写入。进程中断后运行中的命令不会重新执行，回复提示未自动重发；待执行但超过五分钟的命令失效。
 
 长短信分组键含逻辑模块、SIM ICCID 的哈希、来源号码、参考号和总片数。原始事件 ID 使用模块、模块启动号、持久化序号去重。同片同内容重复忽略；同片不同内容保留原片和冲突通知；乱序片按序号拼接。关闭组暂存以抑制重放和识别参考号复用。
 
