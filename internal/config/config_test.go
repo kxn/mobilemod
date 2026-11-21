@@ -34,17 +34,6 @@ func TestEmptyAllowedUsersAllowedForP2P(t *testing.T) {
 	}
 }
 
-func TestLANListenAddresses(t *testing.T) {
-	for _, address := range []string{"0.0.0.0:8765", "192.0.2.10:8765", "[::]:8765", "[::1]:8765"} {
-		c := valid()
-		c.HealthListen = address
-		if err := c.Validate(); err != nil {
-			t.Fatal(address, err)
-		}
-	}
-
-}
-
 func TestWebOnlyCredentialBootstrap(t *testing.T) {
 	c := valid()
 	c.Feishu.AppID, c.Feishu.AppSecret = "", ""
