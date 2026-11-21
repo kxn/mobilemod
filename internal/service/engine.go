@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -28,7 +29,15 @@ type Engine struct {
 	Config    config.Config
 	Store     *store.Store
 	Modules   map[string]Device
+	Log       *slog.Logger
 	modulesMu sync.RWMutex
+}
+
+func (e *Engine) log() *slog.Logger {
+	if e.Log != nil {
+		return e.Log
+	}
+	return slog.Default()
 }
 
 func contains(values []string, s string) bool {
@@ -41,17 +50,23 @@ func contains(values []string, s string) bool {
 }
 func (e *Engine) Accept(_ context.Context, in domain.Incoming) error {
 	if !contains(e.Config.Feishu.AllowedUsers, in.Sender) {
+		// Sender and chat IDs are required to repair the allow-list after an
+		// app change; message text is deliberately not logged.
+		e.log().Info("Feishu message ignored: sender not in allowed_users", "sender", in.Sender, "chat_id", in.ChatID, "chat_type", in.ChatType)
 		return nil
 	}
 	if in.ChatType != "p2p" && (in.ChatType != "group" || !contains(e.Config.Feishu.AllowedChats, in.ChatID)) {
+		e.log().Info("Feishu message ignored: chat not in allowed_chats", "sender", in.Sender, "chat_id", in.ChatID, "chat_type", in.ChatType)
 		return nil
 	}
 	if in.MessageID == "" || in.ChatID == "" {
+		e.log().Debug("Feishu message ignored: missing message or chat ID", "sender", in.Sender)
 		return nil
 	}
 	now := time.Now()
 	age := now.Sub(in.CreatedAt)
 	if age > 5*time.Minute || age < -time.Minute {
+		e.log().Debug("Feishu message ignored: outside processing window", "message_id", in.MessageID, "age", age)
 		return nil
 	}
 	return e.Store.Update(func(tx *store.Tx) error {

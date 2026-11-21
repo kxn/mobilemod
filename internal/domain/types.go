@@ -71,18 +71,20 @@ type Message struct {
 }
 
 type Outbox struct {
-	ID          string       `json:"id"`
-	Recipient   Recipient    `json:"recipient"`
-	Text        string       `json:"text"`
-	CreatedAt   time.Time    `json:"created_at"`
-	NextAttempt time.Time    `json:"next_attempt"`
-	Attempts    int          `json:"attempts"`
-	SentAt      *time.Time   `json:"sent_at,omitempty"`
-	LastCode    string       `json:"last_code,omitempty"`
-	SourceID    string       `json:"source_id,omitempty"`
-	ProviderID  string       `json:"provider_id,omitempty"`
-	ChatID      string       `json:"chat_id,omitempty"`
-	Reply       *ReplyTarget `json:"reply,omitempty"`
+	ID            string       `json:"id"`
+	Recipient     Recipient    `json:"recipient"`
+	Text          string       `json:"text"`
+	CreatedAt     time.Time    `json:"created_at"`
+	NextAttempt   time.Time    `json:"next_attempt"`
+	Attempts      int          `json:"attempts"`
+	SentAt        *time.Time   `json:"sent_at,omitempty"`
+	LastCode      string       `json:"last_code,omitempty"`
+	LastError     string       `json:"last_error,omitempty"`
+	LastAttemptAt *time.Time   `json:"last_attempt_at,omitempty"`
+	SourceID      string       `json:"source_id,omitempty"`
+	ProviderID    string       `json:"provider_id,omitempty"`
+	ChatID        string       `json:"chat_id,omitempty"`
+	Reply         *ReplyTarget `json:"reply,omitempty"`
 }
 
 type Delivery struct {

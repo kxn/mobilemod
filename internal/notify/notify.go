@@ -110,6 +110,16 @@ func Backoff(attempt int) time.Duration {
 	}
 	return min(time.Second*time.Duration(1<<min(attempt, 8)), 5*time.Minute)
 }
+
+// truncate bounds persisted diagnostics so a chatty transport error cannot
+// grow individual outbox records without limit.
+func truncate(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "…"
+}
 func (w Worker) Tick(ctx context.Context, now time.Time) error {
 	var items []domain.Outbox
 	if err := w.Store.View(func(tx *store.Tx) error {
@@ -153,12 +163,18 @@ func (w Worker) Tick(ctx context.Context, now time.Time) error {
 			t := now
 			item.SentAt = &t
 			item.LastCode = ""
+			item.LastError = ""
 			item.ProviderID = delivery.MessageID
 			item.ChatID = delivery.ChatID
 		} else {
 			item.LastCode = "delivery_failed"
+			item.LastError = truncate(err.Error(), 500)
+			t := now
+			item.LastAttemptAt = &t
 			item.NextAttempt = now.Add(Backoff(item.Attempts))
-			w.Log.Warn("Feishu delivery deferred", "notification", item.ID, "attempt", item.Attempts)
+			if w.Log != nil {
+				w.Log.Warn("Feishu delivery deferred", "notification", item.ID, "attempt", item.Attempts, "error", item.LastError)
+			}
 		}
 		if e := w.Store.Update(func(tx *store.Tx) error {
 			if item.SentAt != nil && item.SourceID != "" && delivery.MessageID != "" {

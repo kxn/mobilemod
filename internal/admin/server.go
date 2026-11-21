@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/kxn/mobilemod/internal/modem"
 )
@@ -20,6 +21,9 @@ type Status struct {
 	Feishu               bool             `json:"feishu"`
 	Modules              []modem.Snapshot `json:"modules"`
 	PendingNotifications int              `json:"pending_notifications"`
+	FailedNotifications  int              `json:"failed_notifications"`
+	LastDeliveryError    string           `json:"last_delivery_error,omitempty"`
+	LastDeliveryErrorAt  *time.Time       `json:"last_delivery_error_at,omitempty"`
 	FeishuAppID          string           `json:"feishu_app_id"`
 	FeishuSecretSet      bool             `json:"feishu_secret_set"`
 }

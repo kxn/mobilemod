@@ -64,7 +64,7 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 			log.Info("Web admin setup required; read owner-only initialization file", "path", setupPath)
 		}
 	}
-	r.Engine = &Engine{Config: c, Store: db, Modules: map[string]Device{}}
+	r.Engine = &Engine{Config: c, Store: db, Log: log, Modules: map[string]Device{}}
 	r.feishu = &managedFeishu{client: r.Client, changed: make(chan struct{}, 1)}
 	r.feishu.factory = func(client *feishu.Client) EventListener {
 		return &feishu.Listener{AppID: client.AppID, Secret: client.Secret, Log: log, Handle: r.Engine.Accept}
@@ -96,6 +96,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if err := r.Engine.Recover(); err != nil {
+		return err
+	}
+	if err := r.reconcilePendingRecipients(time.Now()); err != nil {
 		return err
 	}
 	var wg sync.WaitGroup

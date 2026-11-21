@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/kxn/mobilemod/internal/domain"
 	"github.com/kxn/mobilemod/internal/store"
@@ -75,6 +76,17 @@ func TestDurableOutboxRetryAndUnicode(t *testing.T) {
 	w := Worker{Store: db, Sender: fake, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if e = w.Tick(context.Background(), now); e != nil {
 		t.Fatal(e)
+	}
+	var failed domain.Outbox
+	if e = db.View(func(tx *store.Tx) error {
+		return tx.Scan("outbox", func(_ string, b []byte) error {
+			return json.Unmarshal(b, &failed)
+		})
+	}); e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(failed.LastError, "network") || failed.LastAttemptAt == nil {
+		t.Fatalf("delivery error was not persisted: %+v", failed)
 	}
 	w.Tick(context.Background(), now)
 	if fake.calls != 1 {

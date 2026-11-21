@@ -52,6 +52,17 @@ function render(status){
   const feishu=document.querySelector('#feishu');feishu.textContent=status.feishu?'已连接':'未连接';feishu.className=status.feishu?'ok':'off';
   document.querySelector('#online').textContent=online+' / '+status.modules.length;
   document.querySelector('#pending').textContent=String(status.pending_notifications);
+  const failed=document.querySelector('#failed');failed.textContent=String(status.failed_notifications||0);failed.className=status.failed_notifications?'warn':'off';
+  const warning=document.querySelector('#delivery-warning');
+  if(status.last_delivery_error){
+    warning.hidden=false;
+    let text='飞书消息发送失败';
+    if(status.failed_notifications)text+='（'+status.failed_notifications+' 条待重试）';
+    text+='：'+status.last_delivery_error;
+    if(status.last_delivery_error_at)text+='；最近失败于 '+new Date(status.last_delivery_error_at).toLocaleString('zh-CN');
+    text+='。长连接正常只表示能接收事件，不代表能发送消息。若错误码为 99992361，说明接收人 open_id 属于其他飞书应用，请同步更新配置文件中的 allowed_users 与 recipients。';
+    warning.textContent=text;
+  }else{warning.hidden=true;warning.textContent='';}
   if(!feishuDirty)document.querySelector('#feishu-app-id').value=status.feishu_app_id||'';
   document.querySelector('#feishu-secret-state').textContent=status.feishu_secret_set?'已配置密钥；页面不会回显。更换 App ID 时须填写新密钥。':'尚未配置密钥';
   const container=document.querySelector('#modules');if(!cards.size)container.replaceChildren();

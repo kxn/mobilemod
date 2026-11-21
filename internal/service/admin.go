@@ -25,8 +25,19 @@ func (r *Runtime) AdminStatus() (admin.Status, error) {
 			if err := json.Unmarshal(b, &item); err != nil {
 				return err
 			}
-			if item.SentAt == nil {
-				status.PendingNotifications++
+			if item.SentAt != nil {
+				return nil
+			}
+			status.PendingNotifications++
+			if item.LastError == "" {
+				return nil
+			}
+			status.FailedNotifications++
+			// Prefer the most recent failure so the page explains the current
+			// problem instead of an error that has already been superseded.
+			if status.LastDeliveryErrorAt == nil || (item.LastAttemptAt != nil && item.LastAttemptAt.After(*status.LastDeliveryErrorAt)) {
+				status.LastDeliveryError = item.LastError
+				status.LastDeliveryErrorAt = item.LastAttemptAt
 			}
 			return nil
 		})

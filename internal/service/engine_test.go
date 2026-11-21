@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,9 @@ import (
 	"github.com/kxn/mobilemod/internal/domain"
 	"github.com/kxn/mobilemod/internal/modem"
 	"github.com/kxn/mobilemod/internal/store"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -164,5 +167,26 @@ func TestParallelModuleIsolation(t *testing.T) {
 	wg.Wait()
 	if d.sends != 1 || second.sends != 1 {
 		t.Fatal(d.sends, second.sends)
+	}
+}
+
+func TestRejectedSenderIsLoggedForAllowListRepair(t *testing.T) {
+	e, _ := engine(t)
+	var buf bytes.Buffer
+	e.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	bad := incoming("bad", "hello")
+	bad.Sender = "ou_current_app_user"
+	bad.ChatID = "oc_current_app_chat"
+	if err := e.Accept(context.Background(), bad); err != nil {
+		t.Fatal(err)
+	}
+	logged := buf.String()
+	for _, want := range []string{"ou_current_app_user", "oc_current_app_chat", "allowed_users"} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("missing %q in %q", want, logged)
+		}
+	}
+	if strings.Contains(logged, "hello") {
+		t.Fatal("message text must not be logged")
 	}
 }
