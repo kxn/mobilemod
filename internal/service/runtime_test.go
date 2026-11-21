@@ -113,10 +113,13 @@ func TestRuntimeSerialAssemblyToFeishuAndShutdown(t *testing.T) {
 	defer cancel()
 	select {
 	case text := <-notifications:
-		for _, expected := range []string{"第一片第二片", "+12025550100", "one", "50000"} {
+		for _, expected := range []string{"第一片第二片", "+12025550100", "50000"} {
 			if !strings.Contains(text, expected) {
 				t.Fatal(text)
 			}
+		}
+		if strings.Contains(text, "模块") || strings.Contains(text, "消息ID") {
+			t.Fatalf("unexpected diagnostic field in %q", text)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no end-to-end notification")

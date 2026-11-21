@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"log/slog"
 	"time"
 
 	"github.com/kxn/mobilemod/internal/domain"
@@ -16,10 +15,11 @@ import (
 // multiple recipients the intended destination is unknown, so those records
 // are left untouched and surfaced through the delivery error in the UI.
 func (r *Runtime) reconcilePendingRecipients(now time.Time) error {
-	if len(r.Config.Feishu.Recipients) != 1 {
+	recipients := r.recipientsSnapshot()
+	if len(recipients) != 1 {
 		return nil
 	}
-	target := r.Config.Feishu.Recipients[0]
+	target := recipients[0]
 	if target.Type == "" || target.ID == "" {
 		return nil
 	}
@@ -63,11 +63,7 @@ func (r *Runtime) reconcilePendingRecipients(now time.Time) error {
 		return err
 	}
 	for _, change := range changes {
-		log := r.Log
-		if log == nil {
-			log = slog.Default()
-		}
-		log.Warn("pending notification rebound to configured recipient",
+		r.log().Warn("pending notification rebound to configured recipient",
 			"notification", change.item.ID,
 			"recipient_type", change.item.Recipient.Type)
 	}

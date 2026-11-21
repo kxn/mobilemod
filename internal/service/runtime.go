@@ -39,6 +39,8 @@ type Runtime struct {
 	adminAuth    *admin.Auth
 	credentialMu sync.Mutex
 	modulesMu    sync.RWMutex
+	recipientsMu sync.RWMutex
+	recipients   []domain.Recipient
 	Discovery    *modem.Discovery
 }
 
@@ -52,7 +54,15 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 		db.Close()
 		return nil, err
 	}
-	r := &Runtime{Config: c, Store: db, Log: log, Client: feishu.New(credentials.AppID, credentials.Secret)}
+	recipients := append([]domain.Recipient(nil), c.Feishu.Recipients...)
+	saved, err := loadLastRecipient(db)
+	if err != nil {
+		log.Warn("failed to load last Feishu sender; using configured recipients", "error", err)
+	}
+	if saved.Type == "open_id" && saved.ID != "" {
+		recipients = []domain.Recipient{saved}
+	}
+	r := &Runtime{Config: c, Store: db, Log: log, Client: feishu.New(credentials.AppID, credentials.Secret), recipients: recipients}
 	if c.HealthListen != "" {
 		setupPath := filepath.Join(filepath.Dir(c.Database), "admin-setup-code")
 		r.adminAuth, err = admin.NewAuth(db, setupPath)
@@ -67,9 +77,9 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 	r.Engine = &Engine{Config: c, Store: db, Log: log, Modules: map[string]Device{}}
 	r.feishu = &managedFeishu{client: r.Client, changed: make(chan struct{}, 1)}
 	r.feishu.factory = func(client *feishu.Client) EventListener {
-		return &feishu.Listener{AppID: client.AppID, Secret: client.Secret, Log: log, Handle: r.Engine.Accept}
+		return &feishu.Listener{AppID: client.AppID, Secret: client.Secret, Log: log, Handle: r.handleFeishuMessage}
 	}
-	r.assembler = &sms.Assembler{Store: db, Recipients: c.Feishu.Recipients, Timeout: time.Duration(c.AssemblyTimeoutSeconds) * time.Second, MaxParts: c.MaxParts}
+	r.assembler = &sms.Assembler{Store: db, Recipients: c.Feishu.Recipients, RecipientsProvider: r.recipientsSnapshot, Timeout: time.Duration(c.AssemblyTimeoutSeconds) * time.Second, MaxParts: c.MaxParts}
 	for _, cfg := range c.Modules {
 		r.addModule(cfg)
 	}
@@ -265,7 +275,7 @@ func (r *Runtime) addModule(cfg config.Module) *modem.Module {
 				return nil
 			}
 			text := fmt.Sprintf("【模块状态告警】\n模块：%s\n类型：%s\n计数/消息编号：%d\n模块报告队列满或持久化失败，请检查设备连接和存储。已在电脑落盘的短信保持保留。", cfg.ID, code, count)
-			for _, to := range r.Config.Feishu.Recipients {
+			for _, to := range r.recipientsSnapshot() {
 				if err := notify.EnqueueText(tx, key, to, text, time.Now()); err != nil {
 					return err
 				}

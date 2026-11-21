@@ -93,9 +93,6 @@ func (c Config) Validate() error {
 			return errors.New("Feishu app_id and secret must be set together, or both omitted when Web management is enabled")
 		}
 	}
-	if len(c.Feishu.AllowedUsers) == 0 {
-		return errors.New("allowed_users must not be empty (fail closed)")
-	}
 	if len(c.Feishu.Recipients) == 0 {
 		return errors.New("at least one notification recipient is required")
 	}

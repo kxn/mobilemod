@@ -29,7 +29,7 @@ Go 服务通过 USB 串口连接一个或多个 Air780EPM，把短信转发到�
 go build -trimpath -o mobilemod.exe ./cmd/mobilemod
 Copy-Item config.example.json config.local.json
 $env:MOBILEMOD_FEISHU_APP_SECRET = '填入自己的密钥'
-# 编辑 config.local.json 的 app_id、allowed_users 和 recipients；默认自动发现模块
+# 编辑 config.local.json 的 app_id 和 recipients；allowed_users 可选（仅群命令）
 .\mobilemod.exe check -config config.local.json
 .\mobilemod.exe devices
 .\mobilemod.exe run -config config.local.json
@@ -49,7 +49,7 @@ Linux/macOS 使用 `./mobilemod`。数据库路径相对于配置文件目录解
 
 使用企业自建应用，启用机器人，将事件接收方式设为“使用长连接接收事件”，订阅 `im.message.receive_v1` 并发布应用版本。开通机器人发送消息、接收用户单聊消息权限；如要用群聊，还需接收群内 @ 机器人消息权限。应用可用范围必须包含使用者。
 
-`allowed_users` 填允许控制设备的用户 **open_id**，不能为空。`recipients` 指定转发目的地，可为用户 `open_id` 或群 `chat_id`；这与控制权限分开配置。群命令同时要求用户在 `allowed_users`、群在 `allowed_chats`。默认只允许白名单用户单聊控制。普通短信正文只作为文本转发，不能成为命令。
+`recipients` 是首次启动时的转发目的地，可为用户 `open_id` 或群 `chat_id`，至少填一个。程序会把最近一次给机器人发单聊消息的用户自动记为转发接收人并持久化，因此更换飞书应用或用户后无需修改配置；`allowed_users` 只用于群命令鉴权，可为空。群命令同时要求用户在 `allowed_users`、群在 `allowed_chats`。普通短信正文只作为文本转发，不能成为命令。单聊发送者会自动成为转发接收人，请勿把机器人开放给不受信任的用户。
 
 ```text
 /help

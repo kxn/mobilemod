@@ -64,6 +64,8 @@ func TestAuthorizationReplayAndDuplicateSafety(t *testing.T) {
 	ctx := context.Background()
 	bad := incoming("bad", "/sms +12025550100 50000 101")
 	bad.Sender = "attacker"
+	bad.ChatType = "group"
+	bad.ChatID = "not-allowed"
 	e.Accept(ctx, bad)
 	bad = incoming("old", "/sms +12025550100 50000 101")
 	bad.CreatedAt = time.Now().Add(-time.Hour)
@@ -170,6 +172,25 @@ func TestParallelModuleIsolation(t *testing.T) {
 	}
 }
 
+func TestP2PSenderAcceptedWithoutAllowList(t *testing.T) {
+	e, _ := engine(t)
+	in := incoming("new-sender", "/help")
+	in.Sender = "ou_new_app_user"
+	in.ChatID = "oc_new_chat"
+	if err := e.Accept(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	var job domain.CommandJob
+	if err := e.Store.View(func(tx *store.Tx) error {
+		return tx.Get("commands", "new-sender", &job)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if job.Incoming.Sender != "ou_new_app_user" {
+		t.Fatalf("unexpected job: %+v", job)
+	}
+}
+
 func TestRejectedSenderIsLoggedForAllowListRepair(t *testing.T) {
 	e, _ := engine(t)
 	var buf bytes.Buffer
@@ -177,6 +198,7 @@ func TestRejectedSenderIsLoggedForAllowListRepair(t *testing.T) {
 	bad := incoming("bad", "hello")
 	bad.Sender = "ou_current_app_user"
 	bad.ChatID = "oc_current_app_chat"
+	bad.ChatType = "group"
 	if err := e.Accept(context.Background(), bad); err != nil {
 		t.Fatal(err)
 	}

@@ -104,11 +104,31 @@ func TestDurableOutboxRetryAndUnicode(t *testing.T) {
 		}
 	}
 }
-func TestMessageIncludesReceiverAndModule(t *testing.T) {
+func TestMessageIncludesReceiverAndSenderButNotModule(t *testing.T) {
 	text := Format(domain.Message{Identity: domain.Identity{Module: "dongle-2", Receiver: "+12025550101"}, From: "50000", State: "partial", Text: "hello", Parts: 1, Expected: 3})
-	for _, s := range []string{"dongle-2", "+12025550101", "50000", "缺片", "hello"} {
+	for _, s := range []string{"+12025550101", "50000", "缺片", "hello"} {
 		if !strings.Contains(text, s) {
 			t.Fatal(text)
+		}
+	}
+	for _, s := range []string{"dongle-2", "消息ID", "状态：完整"} {
+		if strings.Contains(text, s) {
+			t.Fatalf("unexpected %q in %q", s, text)
+		}
+	}
+}
+
+func TestCompleteMessageOmitsStatusAndUsesFriendlyTime(t *testing.T) {
+	at := time.Date(2026, 11, 21, 9, 27, 41, 0, time.FixedZone("CST", 8*3600))
+	text := Format(domain.Message{ID: "message-id", Identity: domain.Identity{Module: "dongle-2", Receiver: "+8610000000000"}, From: "95588", State: "complete", Text: "body", ReceivedAt: at, Parts: 3, Expected: 3})
+	for _, s := range []string{"2026-11-21 09:27:41", "接收号码：+8610000000000", "body"} {
+		if !strings.Contains(text, s) {
+			t.Fatalf("missing %q in %q", s, text)
+		}
+	}
+	for _, s := range []string{"状态", "片", "消息ID", "dongle-2", "T09:27:41", "+08:00"} {
+		if strings.Contains(text, s) {
+			t.Fatalf("unexpected %q in %q", s, text)
 		}
 	}
 }

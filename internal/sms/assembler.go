@@ -35,8 +35,21 @@ type Raw struct {
 type Assembler struct {
 	Store      *store.Store
 	Recipients []domain.Recipient
-	Timeout    time.Duration
-	MaxParts   int
+	// RecipientsProvider, when set, supplies the current forwarding targets.
+	// It lets the runtime follow the latest Feishu p2p sender without racing
+	// the slice used by tests and static configurations.
+	RecipientsProvider func() []domain.Recipient
+	Timeout            time.Duration
+	MaxParts           int
+}
+
+func (a *Assembler) recipients() []domain.Recipient {
+	if a.RecipientsProvider != nil {
+		if r := a.RecipientsProvider(); len(r) > 0 {
+			return r
+		}
+	}
+	return a.Recipients
 }
 
 func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time.Time) error {
@@ -66,7 +79,7 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 			} else {
 				base.TimeNote = "设备未提供有效时间，以下为电脑收到通知的时间"
 			}
-			return notify.EnqueueMessage(tx, base, a.Recipients)
+			return notify.EnqueueMessage(tx, base, a.recipients())
 		}
 		if e.Event == "mms_received" {
 			base.Kind = "mms"
@@ -75,16 +88,16 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 			if e.ContentLocation != "" {
 				base.Text += "\n载荷地址（未访问）：" + e.ContentLocation
 			}
-			return notify.EnqueueMessage(tx, base, a.Recipients)
+			return notify.EnqueueMessage(tx, base, a.recipients())
 		}
 		m := e.Metadata
 		if m.Total >= 0 && m.Total <= 1 && m.Sequence >= 0 && m.Sequence <= 1 && m.Ref >= 0 {
-			return notify.EnqueueMessage(tx, base, a.Recipients)
+			return notify.EnqueueMessage(tx, base, a.recipients())
 		}
 		if m.Total < 2 || m.Total > a.MaxParts || m.Sequence < 1 || m.Sequence > m.Total || m.Ref < 0 || m.Ref > 65535 {
 			base.State = "invalid"
 			base.Expected = max(1, m.Total)
-			return notify.EnqueueMessage(tx, base, a.Recipients)
+			return notify.EnqueueMessage(tx, base, a.recipients())
 		}
 		key := domain.Key(identity.Module, identity.SIM, e.From, fmt.Sprint(m.Ref), fmt.Sprint(m.Total))
 		var g Group
@@ -97,7 +110,7 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 		if err == nil && !g.Closed && !now.Before(g.Deadline) {
 			g.Closed = true
 			g.Deadline = now.Add(a.Timeout)
-			if err := notify.EnqueueMessage(tx, finish(g), a.Recipients); err != nil {
+			if err := notify.EnqueueMessage(tx, finish(g), a.recipients()); err != nil {
 				return err
 			}
 			if err := tx.Put("groups", key, g); err != nil {
@@ -113,7 +126,7 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 			base.State = "ambiguous"
 			base.Expected = m.Total
 			base.Text = "短信参考编号发生复用或冲突，以下是独立保留的分片：\n" + e.Text
-			return notify.EnqueueMessage(tx, base, a.Recipients)
+			return notify.EnqueueMessage(tx, base, a.recipients())
 		}
 		if err != nil || g.Closed {
 			g = Group{ID: rawID, Identity: identity, From: e.From, Ref: m.Ref, Total: m.Total, Parts: map[int]string{}, Started: now, Deadline: now.Add(a.Timeout)}
@@ -126,7 +139,7 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 			base.State = "ambiguous"
 			base.Expected = m.Total
 			base.Text = fmt.Sprintf("第%d片收到互不相同的内容，未替换原片。冲突片：\n%s", m.Sequence, e.Text)
-			if err := notify.EnqueueMessage(tx, base, a.Recipients); err != nil {
+			if err := notify.EnqueueMessage(tx, base, a.recipients()); err != nil {
 				return err
 			}
 		} else {
@@ -134,7 +147,7 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 		}
 		if len(g.Parts) == g.Total {
 			g.Closed = true
-			if err := notify.EnqueueMessage(tx, finish(g), a.Recipients); err != nil {
+			if err := notify.EnqueueMessage(tx, finish(g), a.recipients()); err != nil {
 				return err
 			}
 		}
@@ -180,7 +193,7 @@ func (a *Assembler) Expire(now time.Time) error {
 		for k, g := range expired {
 			g.Closed = true
 			g.Deadline = now.Add(a.Timeout)
-			if err := notify.EnqueueMessage(tx, finish(g), a.Recipients); err != nil {
+			if err := notify.EnqueueMessage(tx, finish(g), a.recipients()); err != nil {
 				return err
 			}
 			if err := tx.Put("groups", k, g); err != nil {

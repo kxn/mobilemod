@@ -32,7 +32,7 @@
     <section id="modules" class="modules" aria-label="模块列表"><p class="loading">正在读取模块状态…</p></section>
     <section class="section-head"><div><h2>网关设置</h2><p>配置保存到本机数据库，重启后继续生效。</p></div></section>
     <section class="modules" aria-label="网关设置">
-      <article class="settings"><h3>飞书认证</h3><p>验证成功后重新建立长连接，不发送测试消息。更换应用后，须同步检查配置文件中的用户白名单和接收人。</p>
+      <article class="settings"><h3>飞书认证</h3><p>验证成功后重新建立长连接，不发送测试消息。更换应用后，给机器人发一条单聊消息即可自动更新接收人；群命令白名单仍需按需维护。</p>
         <form id="feishu-form">
           <label for="feishu-app-id">App ID</label><input id="feishu-app-id" autocomplete="off" maxlength="128" required>
           <label for="feishu-secret">App Secret</label><input id="feishu-secret" type="password" autocomplete="new-password" maxlength="256" placeholder="留空保留当前应用的密钥">

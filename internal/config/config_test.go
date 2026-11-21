@@ -12,7 +12,7 @@ func valid() Config {
 	return Config{Database: "test.db", Feishu: Feishu{AppID: "app", AppSecret: "secret", AllowedUsers: []string{"owner"}, Recipients: []domain.Recipient{{Type: "open_id", ID: "owner"}}}, Modules: []Module{{ID: "a", Port: "COM1"}}, AssemblyTimeoutSeconds: 300, MaxParts: 32, SendLimitPerHour: 20, RetentionDays: 30}
 }
 func TestValidateFailClosed(t *testing.T) {
-	tests := []func(*Config){func(c *Config) { c.Feishu.AllowedUsers = nil }, func(c *Config) { c.Modules = append(c.Modules, c.Modules[0]) }, func(c *Config) { c.Modules = append(c.Modules, Module{ID: "b", Port: "com1"}) }, func(c *Config) { c.Feishu.Recipients = nil }, func(c *Config) { c.MaxParts = 999 }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "shell"} }, func(c *Config) { c.Modules[0].Number = "+86;whoami" }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "sms"} }}
+	tests := []func(*Config){func(c *Config) { c.Modules = append(c.Modules, c.Modules[0]) }, func(c *Config) { c.Modules = append(c.Modules, Module{ID: "b", Port: "com1"}) }, func(c *Config) { c.Feishu.Recipients = nil }, func(c *Config) { c.MaxParts = 999 }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "shell"} }, func(c *Config) { c.Modules[0].Number = "+86;whoami" }, func(c *Config) { c.Modules[0].Forwarding = Forwarding{Backend: "sms"} }}
 	for i, change := range tests {
 		c := valid()
 		change(&c)
@@ -23,6 +23,14 @@ func TestValidateFailClosed(t *testing.T) {
 	c := valid()
 	if e := c.Validate(); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestEmptyAllowedUsersAllowedForP2P(t *testing.T) {
+	c := valid()
+	c.Feishu.AllowedUsers = nil
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -49,15 +49,25 @@ func contains(values []string, s string) bool {
 	return false
 }
 func (e *Engine) Accept(_ context.Context, in domain.Incoming) error {
-	if !contains(e.Config.Feishu.AllowedUsers, in.Sender) {
-		// Sender and chat IDs are required to repair the allow-list after an
-		// app change; message text is deliberately not logged.
-		e.log().Info("Feishu message ignored: sender not in allowed_users", "sender", in.Sender, "chat_id", in.ChatID, "chat_type", in.ChatType)
-		return nil
-	}
-	if in.ChatType != "p2p" && (in.ChatType != "group" || !contains(e.Config.Feishu.AllowedChats, in.ChatID)) {
-		e.log().Info("Feishu message ignored: chat not in allowed_chats", "sender", in.Sender, "chat_id", in.ChatID, "chat_type", in.ChatType)
-		return nil
+	if in.ChatType == "p2p" {
+		// The bot is private to its owner, so a p2p sender is accepted even
+		// when the configuration still names a previous app's open_id. The
+		// runtime records the latest p2p sender as the forwarding recipient.
+		if in.Sender == "" {
+			e.log().Info("Feishu message ignored: p2p message without sender", "chat_id", in.ChatID)
+			return nil
+		}
+	} else {
+		if !contains(e.Config.Feishu.AllowedUsers, in.Sender) {
+			// Sender and chat IDs are required to repair the allow-list after an
+			// app change; message text is deliberately not logged.
+			e.log().Info("Feishu message ignored: sender not in allowed_users", "sender", in.Sender, "chat_id", in.ChatID, "chat_type", in.ChatType)
+			return nil
+		}
+		if in.ChatType != "group" || !contains(e.Config.Feishu.AllowedChats, in.ChatID) {
+			e.log().Info("Feishu message ignored: chat not in allowed_chats", "sender", in.Sender, "chat_id", in.ChatID, "chat_type", in.ChatType)
+			return nil
+		}
 	}
 	if in.MessageID == "" || in.ChatID == "" {
 		e.log().Debug("Feishu message ignored: missing message or chat ID", "sender", in.Sender)

@@ -21,8 +21,9 @@ type TrackedSender interface {
 }
 
 func Format(m domain.Message) string {
+	const friendlyTime = "2006-01-02 15:04:05"
 	if m.Kind == "call" {
-		text := fmt.Sprintf("【来电通知】\n接收号码：%s\n模块：%s\n来电号码：%s\n时间：%s\n消息ID：%s\n\n%s", m.Identity.Receiver, m.Identity.Module, m.From, m.ReceivedAt.Format(time.RFC3339), m.ID, m.Text)
+		text := fmt.Sprintf("【来电通知】\n接收号码：%s\n来电号码：%s\n时间：%s\n\n%s", m.Identity.Receiver, m.From, m.ReceivedAt.Format(friendlyTime), m.Text)
 		if m.TimeNote != "" {
 			text += "\n" + m.TimeNote
 		}
@@ -36,7 +37,20 @@ func Format(m domain.Message) string {
 	if m.Kind == "mms" {
 		header = "【彩信通知】"
 	}
-	return fmt.Sprintf("%s\n接收号码：%s\n模块：%s\n来源号码：%s\n接收时间：%s\n状态：%s（%d/%d片）\n消息ID：%s\n\n%s", header, m.Identity.Receiver, m.Identity.Module, m.From, m.ReceivedAt.Format(time.RFC3339), state, m.Parts, m.Expected, m.ID, m.Text)
+	lines := []string{
+		header,
+		"接收号码：" + m.Identity.Receiver,
+		"来源号码：" + m.From,
+		"接收时间：" + m.ReceivedAt.Format(friendlyTime),
+	}
+	if m.State != "complete" && state != "" {
+		if m.Kind == "sms" && m.Expected > 0 {
+			state = fmt.Sprintf("%s（%d/%d片）", state, m.Parts, m.Expected)
+		}
+		lines = append(lines, "状态："+state)
+	}
+	lines = append(lines, "", m.Text)
+	return strings.Join(lines, "\n")
 }
 func Split(text string, maxRunes int) []string {
 	if maxRunes < 1 {
