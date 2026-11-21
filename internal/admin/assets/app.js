@@ -60,7 +60,7 @@ function render(status){
     if(status.failed_notifications)text+='（'+status.failed_notifications+' 条待重试）';
     text+='：'+status.last_delivery_error;
     if(status.last_delivery_error_at)text+='；最近失败于 '+new Date(status.last_delivery_error_at).toLocaleString('zh-CN');
-    text+='。长连接正常只表示能接收事件，不代表能发送消息。若接收人为 open_id 且错误码为 99992361，说明它属于其他飞书应用；给机器人发一条单聊消息即可自动切换到你的 open_id，无需修改配置。若仍失败，请检查应用权限。';
+    text+='。若接收人为 open_id 且错误码为 99992361，说明它属于其他飞书应用；给机器人发一条单聊消息即可自动切换。';
     warning.textContent=text;
   }else{warning.hidden=true;warning.textContent='';}
   if(!feishuDirty)document.querySelector('#feishu-app-id').value=status.feishu_app_id||'';

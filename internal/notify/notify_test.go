@@ -133,6 +133,19 @@ func TestCompleteMessageOmitsStatusAndUsesFriendlyTime(t *testing.T) {
 	}
 }
 
+func TestCallNotificationHasNoDisclaimer(t *testing.T) {
+	at := time.Date(2026, 11, 21, 9, 27, 41, 0, time.FixedZone("CST", 8*3600))
+	text := Format(domain.Message{Kind: "call", Identity: domain.Identity{Receiver: "+8610000000000"}, From: "+8610100000000", ReceivedAt: at})
+	if !strings.Contains(text, "【来电通知】") || !strings.Contains(text, "来电号码：+8610100000000") {
+		t.Fatal(text)
+	}
+	for _, s := range []string{"仅记录来电事件", "没有自动接听", "不代表"} {
+		if strings.Contains(text, s) {
+			t.Fatalf("unexpected %q in %q", s, text)
+		}
+	}
+}
+
 type trackedSender struct{ sender }
 
 func (s *trackedSender) SendTracked(ctx context.Context, to domain.Recipient, text, id string) (domain.Delivery, error) {

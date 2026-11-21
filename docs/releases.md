@@ -12,7 +12,7 @@ main 和 Pull Request 跑一次 CI；版本 tag 只触发打包发布，不重�
 | darwin-amd64.tar.gz | GOOS=darwin GOARCH=amd64 | Intel Mac |
 | darwin-arm64.tar.gz | GOOS=darwin GOARCH=arm64 | Apple Silicon |
 
-仅支持 64 位系统。所有构建 CGO_ENABLED=0，不依赖目标系统的 glibc 动态库。CI 使用一个 Linux amd64 runner；平台包由同一打包器交叉编译。其他系统的 USB 驱动和实机接入仍需在部署环境验证。
+仅支持 64 位系统。所有构建 CGO_ENABLED=0，不依赖目标系统的 glibc 动态库。CI 使用一个 Linux amd64 runner；平台包由同一打包器交叉编译。
 
 ## 发版
 

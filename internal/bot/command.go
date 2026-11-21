@@ -20,8 +20,7 @@ const Help = `短信机器人命令：
 /forward 发送号码 cancel 类型   取消呼叫转移
 类型：unconditional / busy / no_reply / unreachable；cancel 可用 all。
 引用回复机器人转发的短信，可直接给原发送者回短信。
-国内手机号可省略+86。正文保留连续空格、换行和末尾空格。
-呼转取决于硬件/运营商适配器；不可用时会明确拒绝。短信提交成功不等于送达。`
+国内手机号可省略+86。正文保留连续空格、换行和末尾空格。`
 
 type Command struct{ Kind, Module, From, To, Text, Action, Mode string }
 

@@ -12,7 +12,7 @@ import (
 	"github.com/kxn/mobilemod/internal/sms"
 )
 
-var ErrUnsupported = errors.New("此模块没有可用的呼叫转移接口。Air780EPM/106未开放CCFC/MMI；尚未配置经过运营商验证的适配器")
+var ErrUnsupported = errors.New("此模块不支持呼叫转移")
 
 func Build(cfg config.Forwarding, c bot.Command) (to, text string, err error) {
 	if cfg.Backend != "sms" {

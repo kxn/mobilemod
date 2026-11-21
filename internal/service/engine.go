@@ -115,7 +115,7 @@ func (e *Engine) Recover() error {
 			if err := tx.Put("commands", j.Incoming.MessageID, j); err != nil {
 				return err
 			}
-			if err := notify.EnqueueText(tx, "reply:"+j.Incoming.MessageID, domain.Recipient{Type: "chat_id", ID: j.Incoming.ChatID}, "上一轮命令处理被中断；为避免重复扣费，没有自动重发短信或重做呼转。请检查设备和消息记录。", time.Now()); err != nil {
+			if err := notify.EnqueueText(tx, "reply:"+j.Incoming.MessageID, domain.Recipient{Type: "chat_id", ID: j.Incoming.ChatID}, "上一轮命令处理被中断；未自动重发。", time.Now()); err != nil {
 				return err
 			}
 		}
@@ -206,7 +206,6 @@ func (e *Engine) Tick(ctx context.Context) error {
 			return e.reply(job, err.Error())
 		}
 		result = e.submitExpected(ctx, device, job.Incoming.MessageID, state.ID, c.To, c.Text, state)
-		result += "\n这是运营商业务短信提交结果；呼转实际状态必须以运营商确认回复为准。"
 	}
 	return e.reply(job, result)
 }
@@ -244,7 +243,7 @@ func (e *Engine) submitExpected(ctx context.Context, device Device, commandID, m
 	record := domain.SendRecord{ID: id, Module: module, To: to, Text: text, State: "unknown", CreatedAt: now, UpdatedAt: now, From: s.Receiver, SIM: s.Identity.SIM}
 	err := e.Store.Update(func(tx *store.Tx) error {
 		if tx.Has("sends", id) {
-			return errors.New("该命令已有发送记录；为避免重复扣费，不会重发")
+			return errors.New("该命令已有发送记录，不会重发")
 		}
 		count := 0
 		if err := tx.Scan("sends", func(_ string, b []byte) error {
@@ -288,18 +287,18 @@ func (e *Engine) submitExpected(ctx context.Context, device Device, commandID, m
 	}
 	record.UpdatedAt = time.Now()
 	if err = e.Store.Update(func(tx *store.Tx) error { return tx.Put("sends", id, record) }); err != nil {
-		return "发送记录保存失败；结果未知，请勿直接重发。请求ID：" + id
+		return "发送记录保存失败；未自动重试。请求ID：" + id
 	}
 	switch record.State {
 	case "submitted":
-		return fmt.Sprintf("短信已提交给短信中心。\n模块：%s\n发送号码：%s\n目标号码：%s\n请求ID：%s\n这不代表接收手机已收到。", module, s.Receiver, to, id)
+		return fmt.Sprintf("短信已提交。\n模块：%s\n发送号码：%s\n目标号码：%s\n请求ID：%s", module, s.Receiver, to, id)
 	case "rejected":
 		if record.Error != "" {
 			return "SIM或发送号码已变化，未发送；请刷新模块状态。请求ID：" + id
 		}
 		return "短信提交失败，未自动重试。请求ID：" + id
 	default:
-		return "短信结果未知，未自动重试。请检查手机与记录，避免重复扣费。请求ID：" + id
+		return "短信结果未知，未自动重试。请求ID：" + id
 	}
 }
 

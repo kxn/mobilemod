@@ -23,7 +23,10 @@ type TrackedSender interface {
 func Format(m domain.Message) string {
 	const friendlyTime = "2006-01-02 15:04:05"
 	if m.Kind == "call" {
-		text := fmt.Sprintf("【来电通知】\n接收号码：%s\n来电号码：%s\n时间：%s\n\n%s", m.Identity.Receiver, m.From, m.ReceivedAt.Format(friendlyTime), m.Text)
+		text := fmt.Sprintf("【来电通知】\n接收号码：%s\n来电号码：%s\n时间：%s", m.Identity.Receiver, m.From, m.ReceivedAt.Format(friendlyTime))
+		if m.Text != "" {
+			text += "\n\n" + m.Text
+		}
 		if m.TimeNote != "" {
 			text += "\n" + m.TimeNote
 		}

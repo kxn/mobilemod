@@ -12,4 +12,4 @@ Windows 读取当前串口列表和 USB 接口注册信息；Linux 读取 sysfs 
 
 如果需要完全手工指定端口，显式设置 `auto_discover: false`，并为每个模块填写 port；这是可选模式。Linux 手工模式建议使用 `/dev/serial/by-id/` 路径。
 
-没有在线且短信就绪的模块时 `/readyz` 返回 503，`/healthz` 仍返回 200。这表示没有可用的短信设备，不代表进程退出。
+没有在线且短信就绪的模块时 `/readyz` 返回 503，`/healthz` 仍返回 200。

@@ -70,7 +70,7 @@ func (a *Assembler) Ingest(identity domain.Identity, e domain.Envelope, now time
 		base := domain.Message{ID: rawID, Identity: identity, From: e.From, Text: e.Text, ReceivedAt: now, Kind: "sms", State: "complete", Parts: 1, Expected: 1}
 		if e.Event == "call_received" {
 			base.Kind = "call"
-			base.Text = "仅记录来电事件，没有自动接听。"
+			base.Text = ""
 			if e.From == "" {
 				base.From = "未知（固件未提供来电号码）"
 			}
