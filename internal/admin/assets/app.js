@@ -2,7 +2,6 @@
 const cards = new Map();
 let busy = false;
 let nextCard = 0;
-let setupRequired = false;
 let feishuDirty = false;
 const el = (tag, cls, text) => {
   const node = document.createElement(tag);
@@ -93,26 +92,9 @@ function render(status){
 async function refresh(){
   if(busy)return;busy=true;
   try{
-    const authResponse=await fetch('/api/auth',{cache:'no-store'});
-    if(!authResponse.ok)throw new Error('暂时无法连接管理界面');
-    const auth=await authResponse.json();setupRequired=auth.setup_required;
-    document.querySelector('#authentication').hidden=auth.authenticated;
-    document.querySelector('#gateway').hidden=!auth.authenticated;
-    document.querySelector('#logout').hidden=!auth.authenticated;
-    if(!auth.authenticated){
-      document.querySelector('#setup-code-row').hidden=!setupRequired;
-      document.querySelector('#setup-code').required=setupRequired;
-      document.querySelector('#auth-title').textContent=setupRequired?'设置管理口令':'登录管理界面';
-      document.querySelector('#auth-description').textContent=setupRequired?'使用服务器的一次性初始化码，为管理界面设置口令。':'输入管理口令以查看状态和修改设置。';
-      document.querySelector('#login-submit').textContent=setupRequired?'设置并登录':'登录';
-      document.querySelector('#login-password').minLength=setupRequired?12:1;
-      document.querySelector('#login-password').autocomplete=setupRequired?'new-password':'current-password';
-      document.querySelector('#updated').textContent=setupRequired?'等待初始化':'尚未登录';
-      cards.clear();document.querySelector('#modules').replaceChildren();feishuDirty=false;
-      document.querySelector('#feishu-app-id').value='';document.querySelector('#feishu-secret').value='';
-      return;
-    }
-    const response=await fetch('/api/status',{cache:'no-store'});if(!response.ok)throw new Error('暂时无法读取网关状态');render(await response.json());
+    const response=await fetch('/api/status',{cache:'no-store'});
+    if(!response.ok)throw new Error('暂时无法读取网关状态');
+    render(await response.json());
   }
   catch(error){setNotice(error.message);}
   finally{busy=false;}
@@ -122,31 +104,12 @@ async function mutate(path,method,body){
   const response=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!response.ok)throw new Error((await response.text()).trim()||'请求失败');
 }
-document.querySelector('#auth-form').addEventListener('submit',async event=>{
-  event.preventDefault();const button=document.querySelector('#login-submit');button.disabled=true;
-  try{
-    await mutate('/api/auth/'+(setupRequired?'setup':'login'),'POST',{password:document.querySelector('#login-password').value,setup_code:document.querySelector('#setup-code').value.trim()});
-    document.querySelector('#login-password').value='';document.querySelector('#setup-code').value='';setNotice('');await refresh();
-  }catch(error){setNotice(error.message);}finally{button.disabled=false;}
-});
-document.querySelector('#logout').addEventListener('click',async()=>{
-  try{await mutate('/api/auth/logout','POST',{});await refresh();setNotice('已退出登录');}catch(error){setNotice(error.message);}
-});
 document.querySelector('#feishu-app-id').addEventListener('input',()=>{feishuDirty=true;});
 document.querySelector('#feishu-form').addEventListener('submit',async event=>{
   event.preventDefault();const button=event.target.querySelector('button');const message=document.querySelector('#feishu-message');button.disabled=true;message.textContent='正在验证…';
   try{
     await mutate('/api/feishu','PUT',{app_id:document.querySelector('#feishu-app-id').value,app_secret:document.querySelector('#feishu-secret').value});
     document.querySelector('#feishu-secret').value='';feishuDirty=false;message.textContent='已保存，正在重新连接飞书';message.className='message ok';await refresh();
-  }catch(error){message.textContent=error.message;message.className='message warn';}finally{button.disabled=false;}
-});
-document.querySelector('#password-form').addEventListener('submit',async event=>{
-  event.preventDefault();const message=document.querySelector('#password-message');const password=document.querySelector('#new-password').value;
-  if(password!==document.querySelector('#confirm-password').value){message.textContent='两次输入的新口令不一致';message.className='message warn';return;}
-  const button=event.target.querySelector('button');button.disabled=true;
-  try{
-    await mutate('/api/auth/password','PUT',{old_password:document.querySelector('#old-password').value,password});
-    event.target.reset();message.textContent='口令已更新，其他登录已失效';message.className='message ok';
   }catch(error){message.textContent=error.message;message.className='message warn';}finally{button.disabled=false;}
 });
 document.querySelector('#refresh').addEventListener('click',refresh);

@@ -25,61 +25,35 @@ func (b *backend) AdminStatus() (Status, error) {
 	return Status{Feishu: true, Modules: []modem.Snapshot{{ID: "one", SIMKey: "sim", Online: true, Receiver: b.number}}}, nil
 }
 
-func TestLANAuthenticationAndCredentialProtection(t *testing.T) {
-	a, _, code := authFixture(t)
+func TestLANAccessAndCredentialUpdate(t *testing.T) {
 	b := &backend{}
-	h := New(b, a)
-	var cookie *http.Cookie
-	request := func(method, path, body, origin string, authenticated bool) *httptest.ResponseRecorder {
+	h := New(b)
+	request := func(method, path, body, origin string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://192.0.2.10:8765"+path, strings.NewReader(body))
 		r.Header.Set("Origin", origin)
 		r.Header.Set("Content-Type", "application/json")
-		if authenticated && cookie != nil {
-			r.AddCookie(cookie)
-		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w
 	}
 	origin := "http://192.0.2.10:8765"
-	for _, path := range []string{"/api/status", "/api/modules/one/number", "/api/feishu"} {
-		method := "PUT"
-		if path == "/api/status" {
-			method = "GET"
-		}
-		if w := request(method, path, `{}`, origin, false); w.Code != 401 {
-			t.Fatal("anonymous API access", path, w.Code)
-		}
+	if w := request("GET", "/api/status", "", ""); w.Code != 200 {
+		t.Fatal("status without login", w.Code)
 	}
-	if w := request("GET", "/api/auth", "", "", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"setup_required":true`) {
-		t.Fatal(w)
+	if w := request("GET", "/api/auth", "", ""); w.Code != 404 {
+		t.Fatal("auth endpoint still exists", w.Code)
 	}
-	setup, _ := json.Marshal(map[string]string{"setup_code": code, "password": "fictional-admin-password"})
-	if w := request("POST", "/api/auth/setup", string(setup), "http://other.example", false); w.Code != 403 {
-		t.Fatal("cross origin setup", w.Code)
+	if w := request("PUT", "/api/feishu", `{"app_id":"fictional-app","app_secret":"fictional-secret"}`, "http://evil.example"); w.Code != 403 {
+		t.Fatal("cross origin credential update", w.Code)
 	}
-	w := request("POST", "/api/auth/setup", string(setup), origin, false)
-	if w.Code != 204 || len(w.Result().Cookies()) != 1 {
-		t.Fatal("setup failed", w.Code)
+	if w := request("PUT", "/api/feishu", `{"app_id":"fictional-app","app_secret":"fictional-secret"}`, origin); w.Code != 204 || b.app != "fictional-app" || b.secret != "fictional-secret" {
+		t.Fatal("credential update failed", w.Code)
 	}
-	cookie = w.Result().Cookies()[0]
-	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.MaxAge <= 0 {
-		t.Fatal("unsafe session cookie")
+	if w := request("PUT", "/api/modules/one/number", `{"sim_key":"sim","number":"+12025550100"}`, origin); w.Code != 204 || b.number != "+12025550100" {
+		t.Fatal(w.Code, b.number)
 	}
-	if w := request("GET", "/api/status", "", "", true); w.Code != 200 {
-		t.Fatal(w.Code)
-	}
-	if w := request("PUT", "/api/feishu", `{"app_id":"fictional-app","app_secret":"fictional-secret"}`, origin, true); w.Code != 204 || b.app != "fictional-app" || b.secret != "fictional-secret" {
-		t.Fatal("authenticated credential update failed", w.Code)
-	}
-	if w := request("POST", "/api/auth/logout", `{}`, origin, true); w.Code != 204 {
-		t.Fatal(w.Code)
-	}
-	if w := request("GET", "/api/status", "", "", true); w.Code != 401 {
-		t.Fatal("logged out session accepted")
-	}
-
 }
+
 func (b *backend) SetModuleNumber(id, sim, number string) error {
 	if id != "one" || sim != "sim" {
 		return modem.ErrSIMChanged
@@ -90,8 +64,8 @@ func (b *backend) SetModuleNumber(id, sim, number string) error {
 }
 func TestUIAndWriteProtection(t *testing.T) {
 	b := &backend{}
-	h := New(b, nil)
-	request := func(method, path, body, origin, token, host string) *httptest.ResponseRecorder {
+	h := New(b)
+	request := func(method, path, body, origin, host string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://127.0.0.1:8765"+path, strings.NewReader(body))
 		r.Host = host
 		r.Header.Set("Content-Type", "application/json")
@@ -100,38 +74,38 @@ func TestUIAndWriteProtection(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	get := request("GET", "/api/status", "", "", "", "127.0.0.1:8765")
+	get := request("GET", "/api/status", "", "", "127.0.0.1:8765")
 	var view Status
 	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &view) != nil {
 		t.Fatal(get)
 	}
 	for _, path := range []string{"/", "/assets/app.js", "/assets/style.css"} {
-		w := request("GET", path, "", "", "", "127.0.0.1:8765")
+		w := request("GET", path, "", "", "127.0.0.1:8765")
 		if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 			t.Fatal(path, w.Code)
 		}
 	}
 	body := `{"sim_key":"sim","number":"+12025550100"}`
-	for _, c := range []struct{ host, origin, token string }{{"127.0.0.1:8765", "http://evil.example", ""}, {"127.0.0.1:8765", "", ""}} {
-		if w := request("PUT", "/api/modules/one/number", body, c.origin, c.token, c.host); w.Code != 403 {
+	for _, c := range []struct{ host, origin string }{{"127.0.0.1:8765", "http://evil.example"}, {"127.0.0.1:8765", ""}} {
+		if w := request("PUT", "/api/modules/one/number", body, c.origin, c.host); w.Code != 403 {
 			t.Fatal("unsafe write accepted", w.Code)
 		}
 	}
 	if b.calls != 0 {
 		t.Fatal("unsafe write reached backend")
 	}
-	if w := request("PUT", "/api/modules/one/number", body, "http://127.0.0.1:8765", "", "127.0.0.1:8765"); w.Code != 204 || b.number != "+12025550100" {
+	if w := request("PUT", "/api/modules/one/number", body, "http://127.0.0.1:8765", "127.0.0.1:8765"); w.Code != 204 || b.number != "+12025550100" {
 		t.Fatal(w.Code, b.number)
 	}
-	if w := request("PUT", "/api/modules/one/number", `{"sim_key":"old","number":"+12025550101"}`, "http://127.0.0.1:8765", "", "127.0.0.1:8765"); w.Code != 409 || b.calls != 1 {
+	if w := request("PUT", "/api/modules/one/number", `{"sim_key":"old","number":"+12025550101"}`, "http://127.0.0.1:8765", "127.0.0.1:8765"); w.Code != 409 || b.calls != 1 {
 		t.Fatal("stale card write accepted", w.Code)
 	}
 	for _, invalid := range []string{strings.Repeat("x", 5000)} {
-		if w := request("PUT", "/api/modules/one/number", invalid, "http://127.0.0.1:8765", "", "127.0.0.1:8765"); w.Code != 400 {
+		if w := request("PUT", "/api/modules/one/number", invalid, "http://127.0.0.1:8765", "127.0.0.1:8765"); w.Code != 400 {
 			t.Fatal(w.Code)
 		}
 	}
-	if w := request(http.MethodPost, "/api/status", "", "", "", "127.0.0.1:8765"); w.Code != 405 {
+	if w := request(http.MethodPost, "/api/status", "", "", "127.0.0.1:8765"); w.Code != 405 {
 		t.Fatal(w.Code)
 	}
 }

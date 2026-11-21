@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -36,7 +35,6 @@ type Runtime struct {
 	Log          *slog.Logger
 	assembler    *sms.Assembler
 	feishu       *managedFeishu
-	adminAuth    *admin.Auth
 	credentialMu sync.Mutex
 	modulesMu    sync.RWMutex
 	recipientsMu sync.RWMutex
@@ -63,17 +61,6 @@ func New(c config.Config, log *slog.Logger) (*Runtime, error) {
 		recipients = []domain.Recipient{saved}
 	}
 	r := &Runtime{Config: c, Store: db, Log: log, Client: feishu.New(credentials.AppID, credentials.Secret), recipients: recipients}
-	if c.HealthListen != "" {
-		setupPath := filepath.Join(filepath.Dir(c.Database), "admin-setup-code")
-		r.adminAuth, err = admin.NewAuth(db, setupPath)
-		if err != nil {
-			db.Close()
-			return nil, err
-		}
-		if setup, _ := r.adminAuth.State(""); setup {
-			log.Info("Web admin setup required; read owner-only initialization file", "path", setupPath)
-		}
-	}
 	r.Engine = &Engine{Config: c, Store: db, Log: log, Modules: map[string]Device{}}
 	r.feishu = &managedFeishu{client: r.Client, changed: make(chan struct{}, 1)}
 	r.feishu.factory = func(client *feishu.Client) EventListener {
@@ -120,7 +107,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return err
 		}
 		mux := http.NewServeMux()
-		web := admin.New(r, r.adminAuth)
+		web := admin.New(r)
 		mux.Handle("/", web)
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
 			if req.Method != http.MethodGet {

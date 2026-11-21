@@ -1,4 +1,4 @@
-// Package admin serves the authenticated status and configuration UI.
+// Package admin serves the status and configuration UI.
 package admin
 
 import (
@@ -34,11 +34,10 @@ type Backend interface {
 }
 type Handler struct {
 	backend Backend
-	Auth    *Auth
 }
 
-func New(backend Backend, auth *Auth) *Handler {
-	return &Handler{backend: backend, Auth: auth}
+func New(backend Backend) *Handler {
+	return &Handler{backend: backend}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,17 +45,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-	if h.Auth != nil && (r.URL.Path == "/api/auth" || strings.HasPrefix(r.URL.Path, "/api/auth/")) {
-		h.serveAuth(w, r)
-		return
-	}
-	if h.Auth != nil && r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/assets/") {
-		_, authenticated := h.Auth.State(sessionToken(r))
-		if !authenticated {
-			http.Error(w, "请先登录管理界面", http.StatusUnauthorized)
-			return
-		}
-	}
 	if r.Method == http.MethodGet {
 		switch r.URL.Path {
 		case "/api/status":
@@ -165,67 +153,4 @@ func decodeBody(w http.ResponseWriter, r *http.Request, body any) bool {
 		return false
 	}
 	return true
-}
-func sessionToken(r *http.Request) string {
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil {
-		return ""
-	}
-	return cookie.Value
-}
-func setSession(w http.ResponseWriter, r *http.Request, token string) {
-	age := int(sessionLifetime.Seconds())
-	if token == "" {
-		age = -1
-	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: age})
-}
-func (h *Handler) serveAuth(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api/auth" && r.Method == http.MethodGet {
-		setup, authenticated := h.Auth.State(sessionToken(r))
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"setup_required": setup, "authenticated": authenticated})
-		return
-	}
-	if (r.Method != http.MethodPost && r.Method != http.MethodPut) || !h.validMutation(r) {
-		http.Error(w, "Invalid origin or method", 403)
-		return
-	}
-	var body struct {
-		Password string `json:"password"`
-		Old      string `json:"old_password"`
-		Code     string `json:"setup_code"`
-	}
-	if !decodeBody(w, r, &body) {
-		return
-	}
-	var token string
-	var err error
-	switch {
-	case r.URL.Path == "/api/auth/setup" && r.Method == http.MethodPost:
-		token, err = h.Auth.Setup(body.Code, body.Password)
-	case r.URL.Path == "/api/auth/login" && r.Method == http.MethodPost:
-		token, err = h.Auth.Login(body.Password)
-	case r.URL.Path == "/api/auth/password" && r.Method == http.MethodPut:
-		token, err = h.Auth.Change(sessionToken(r), body.Old, body.Password)
-	case r.URL.Path == "/api/auth/logout" && r.Method == http.MethodPost:
-		h.Auth.Logout(sessionToken(r))
-	default:
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, ErrUnauthorized) {
-			status = http.StatusUnauthorized
-		}
-		if errors.Is(err, ErrRateLimited) {
-			status = http.StatusTooManyRequests
-			w.Header().Set("Retry-After", "60")
-		}
-		http.Error(w, "认证失败、口令长度不符或尝试过于频繁", status)
-		return
-	}
-	setSession(w, r, token)
-	w.WriteHeader(http.StatusNoContent)
 }
