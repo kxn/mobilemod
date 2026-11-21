@@ -22,9 +22,10 @@ func TestReconcilePendingRecipientsSingleTarget(t *testing.T) {
 	target := domain.Recipient{Type: "open_id", ID: "ou_new"}
 	sentAt := now.Add(-time.Hour)
 	items := []domain.Outbox{
-		{ID: "pending", Recipient: oldRecipient, Attempts: 7, NextAttempt: now.Add(time.Hour), LastCode: "delivery_failed", LastError: "open_id cross app", LastAttemptAt: &attempted},
+		{ID: "pending", Recipient: oldRecipient, Forward: true, Attempts: 7, NextAttempt: now.Add(time.Hour), LastCode: "delivery_failed", LastError: "open_id cross app", LastAttemptAt: &attempted},
 		{ID: "already", Recipient: target, Attempts: 2, NextAttempt: now.Add(time.Hour)},
 		{ID: "sent", Recipient: oldRecipient, Attempts: 3, SentAt: &sentAt},
+		{ID: "reply", Recipient: oldRecipient, Attempts: 1, NextAttempt: now.Add(time.Hour)},
 	}
 	for _, item := range items {
 		item := item
@@ -62,6 +63,13 @@ func TestReconcilePendingRecipientsSingleTarget(t *testing.T) {
 	}
 	if sent.Recipient != oldRecipient || sent.Attempts != 3 {
 		t.Fatalf("sent item changed: %+v", sent)
+	}
+	var reply domain.Outbox
+	if err := db.View(func(tx *store.Tx) error { return tx.Get("outbox", "reply", &reply) }); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Recipient != oldRecipient || reply.Attempts != 1 {
+		t.Fatalf("command reply must keep its chat destination: %+v", reply)
 	}
 }
 

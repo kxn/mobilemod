@@ -37,6 +37,14 @@ func (r *Runtime) reconcilePendingRecipients(now time.Time) error {
 			if item.SentAt != nil || item.Recipient == target {
 				return nil
 			}
+			// Only SMS/MMS/call forwarding records follow the configured
+			// recipient. Command replies and alerts carry their own chat_id
+			// destination and must not be redirected by a recipient change.
+			// Records written before the Forward field existed are recognized
+			// by their SMS source/reply correlation.
+			if !item.Forward && item.Reply == nil && item.SourceID == "" {
+				return nil
+			}
 			item.Recipient = target
 			item.Attempts = 0
 			item.NextAttempt = now

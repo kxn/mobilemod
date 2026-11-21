@@ -81,6 +81,7 @@ type Outbox struct {
 	LastCode      string       `json:"last_code,omitempty"`
 	LastError     string       `json:"last_error,omitempty"`
 	LastAttemptAt *time.Time   `json:"last_attempt_at,omitempty"`
+	Forward       bool         `json:"forward,omitempty"`
 	SourceID      string       `json:"source_id,omitempty"`
 	ProviderID    string       `json:"provider_id,omitempty"`
 	ChatID        string       `json:"chat_id,omitempty"`

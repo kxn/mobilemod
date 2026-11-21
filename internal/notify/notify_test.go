@@ -174,3 +174,34 @@ func TestReplyMappingSurvivesSourceRetentionAndRestart(t *testing.T) {
 		t.Fatal(link)
 	}
 }
+
+func TestEnqueueMessageMarksForwarding(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now()
+	m := domain.Message{ID: "m1", Kind: "sms", Identity: domain.Identity{Receiver: "+1"}, From: "95588", Text: "hello", ReceivedAt: now}
+	if err := db.Update(func(tx *store.Tx) error {
+		return EnqueueMessage(tx, m, []domain.Recipient{{Type: "open_id", ID: "owner"}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var items []domain.Outbox
+	if err := db.View(func(tx *store.Tx) error {
+		return tx.Scan("outbox", func(_ string, b []byte) error {
+			var item domain.Outbox
+			if err := json.Unmarshal(b, &item); err != nil {
+				return err
+			}
+			items = append(items, item)
+			return nil
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || !items[0].Forward || items[0].SourceID != "m1" {
+		t.Fatalf("unexpected forwarding record: %+v", items)
+	}
+}

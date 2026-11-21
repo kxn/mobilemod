@@ -69,6 +69,10 @@ func Split(text string, maxRunes int) []string {
 	return parts
 }
 func EnqueueText(tx *store.Tx, id string, to domain.Recipient, text string, now time.Time, sourceID ...string) error {
+	return enqueueText(tx, id, to, text, now, false, sourceID...)
+}
+
+func enqueueText(tx *store.Tx, id string, to domain.Recipient, text string, now time.Time, forward bool, sourceID ...string) error {
 	parts := Split(text, 2500)
 	for i, p := range parts {
 		key := domain.Key(id, to.Type, to.ID, fmt.Sprint(i))
@@ -90,7 +94,7 @@ func EnqueueText(tx *store.Tx, id string, to domain.Recipient, text string, now 
 			}
 			reply = &domain.ReplyTarget{SourceID: m.ID, Receiver: m.Identity.Receiver, From: m.From, SIM: m.Identity.SIM, Module: m.Identity.Module}
 		}
-		if err := tx.Put("outbox", key, domain.Outbox{ID: key, Recipient: to, Text: p, CreatedAt: now.Add(time.Duration(i)), NextAttempt: now, SourceID: source, Reply: reply}); err != nil {
+		if err := tx.Put("outbox", key, domain.Outbox{ID: key, Recipient: to, Text: p, CreatedAt: now.Add(time.Duration(i)), NextAttempt: now, Forward: forward, SourceID: source, Reply: reply}); err != nil {
 			return err
 		}
 	}
@@ -105,7 +109,7 @@ func EnqueueMessage(tx *store.Tx, m domain.Message, to []domain.Recipient) error
 		if m.Kind == "sms" {
 			source = m.ID
 		}
-		if err := EnqueueText(tx, "sms:"+m.ID, r, Format(m), m.ReceivedAt, source); err != nil {
+		if err := enqueueText(tx, "sms:"+m.ID, r, Format(m), m.ReceivedAt, true, source); err != nil {
 			return err
 		}
 	}
